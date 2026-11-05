@@ -334,7 +334,7 @@
 
     <div class="row" style="margin-top:14px"><label>Date field</label><span style="font-size:13px">Date well completed</span></div>
     <div class="row"><label>Value field(s)</label></div>
-    <div id="valueFieldChecks" style="display:flex;flex-direction:row;flex-wrap:wrap;align-items:flex-start;gap:2px 24px;max-height:120px;overflow-y:auto;margin-top:-2px"></div>
+    <div id="valueFieldChecks" style="display:flex;flex-direction:row;flex-wrap:wrap;align-items:flex-start;gap:2px 24px;margin-top:-2px"></div>
 
     <div class="stat-row"><span class="k">Points loaded in view</span><span class="v" id="statLoaded">0</span></div>
     <div class="stat-row" id="statFilteredRow" style="display:none"><span class="k">Inside drawn filter</span><span class="v" id="statFiltered">0</span></div>
@@ -1425,7 +1425,7 @@ async function loadFieldPickers() {
   updateStats();
 
   // Sensible starting point — still just a toggle, fully changeable.
-  const defaultValue = 'depth_well';
+  const defaultValue = '_count';
   const defaultCb = valChecksEl.querySelector(`input[value="${defaultValue}"]`);
   if (defaultCb) { defaultCb.checked = true; state.valueFields = [defaultValue]; }
   redrawChart();
@@ -2424,21 +2424,13 @@ function updateUndatedNote() {
   const mv = (id, to) => { const el = $(id); if (el) $(to).appendChild(el); };
   mv('drawFilterBtn', 'fpDraw'); mv('drawControls', 'fpDraw'); mv('placeFilterSelect', 'fpPlace'); mv('mxAqSel', 'fpAq'); mv('mxStudySel', 'fpStudy'); mv('mxGeo', 'fpSearch');
   const ov = $('drawOverlay'); if (ov) ov.style.display = 'none';
-  // Stats & Chart is split: the selection controls (value fields, counts, attribute export) go to the top
-  // of the Filters tab; the chart itself stays on the right in a "Trend chart" tab. Its duplicate
-  // date-range slider is hidden — the Filters date range below drives the same state.timeRange.
+  // Trend chart tab (right): the "Plot a trend" field selection stays with its chart. Its duplicate date-range
+  // slider is hidden - the Filters tab date range drives the same state.timeRange.
   const sp = document.querySelector('#panel .panel-tab[data-panel="stats"]');
   if (sp) {
-    const box = document.createElement('div'); box.id = 'fpStats';
-    const stop = $('chartExportRow');
-    while (sp.firstChild && sp.firstChild !== stop) box.appendChild(sp.firstChild);
-    const go = document.createElement('button'); go.type = 'button'; go.className = 'small'; go.style.cssText = 'width:100%;margin-top:6px';
-    go.textContent = 'Show trend chart →'; go.onclick = () => showTab('stats'); box.appendChild(go);
-    filters.insertBefore(box, filters.firstChild);
     const sl = $('statsTimeFrom')?.closest('.time-slider'), lb = $('statsTimeFromNum')?.closest('.time-slider-labels');
     const ttl = sl?.previousElementSibling;
     [sl, lb, ttl && ttl.classList.contains('filter-section-title') ? ttl : null].forEach((e) => e && (e.style.display = 'none'));
-    const h = document.createElement('h2'); h.textContent = 'Trend chart'; h.style.marginTop = '0'; sp.insertBefore(h, sp.firstChild);
     const st = document.querySelector('#panel .tabs .tab[data-tab="stats"]'); if (st) st.textContent = 'Trend chart';
     const first = document.querySelector('#panel .tabs .tab[data-tab="mxgw"]') || document.querySelector('#panel .tabs .tab');
     first?.click();
