@@ -213,6 +213,7 @@
    overriding the white-on-green style - blue text on green, and white text vanishing on hover */
 .leaflet-container a.pod-popup-link, .leaflet-container a.pod-popup-link:visited, button.pod-popup-link { color: var(--accent-ink); background: var(--accent); }
 .leaflet-container a.pod-popup-link:hover, button.pod-popup-link:hover { color: var(--accent-ink); background: var(--accent); filter: brightness(1.15); }
+#mxDataLoad{position:absolute;left:50%;bottom:16px;transform:translateX(-50%);z-index:1000;background:#fff;border-radius:16px;padding:6px 14px;font-size:12.5px;box-shadow:0 1px 6px rgba(0,0,0,.25);pointer-events:none}
 </style>
 </head>
 <body>
@@ -428,15 +429,6 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
-<!-- 2D aquifer extents for spatial selection (optional; built by pod_explorer.py) -->
-<script src="aquifers.js"></script>
-<!-- meter anomalies + groundwater levels (optional; built by pod_explorer.py) -->
-<script src="dashboard_data.js"></script>
-<script src="dashboard_data_2.js"></script>
-<!-- well screen / water-bearing intervals for the schematic (built by pod_explorer.py) -->
-<script src="well_construction.js"></script>
-<!-- optional: water levels rebuilt from the NM water data API (built by pod_explorer.py); overrides the wells in dashboard_data_2.js -->
-<script src="waterlevels.js"></script>
 <script>
 'use strict';
 
@@ -2176,8 +2168,13 @@ initTimeFilter();
    Data: dashboard_data.js (window.DASH_DATA) built by pod_explorer.py. Everything here is optional —
    without the data file the base explorer works exactly as before. Wrapped in an IIFE so nothing collides
    with the explorer's globals; it hooks in by wrapping applyPolygonStyling / rebuildVisibleMarkers / buildPopupHtml. */
-(function () {
+(async function () {
 'use strict';
+// Data files load in the background (~35 MB): the map, filters and area tools work immediately,
+// and the meter / groundwater parts switch on when the files arrive.
+function loadScript(src) { return new Promise((res) => { const s = document.createElement('script'); s.src = src; s.onload = () => res(true); s.onerror = () => res(false); document.head.appendChild(s); }); }
+const AQ_LOAD = loadScript('aquifers.js');
+const DATA_LOAD = Promise.all(['dashboard_data.js', 'dashboard_data_2.js', 'waterlevels.js'].map(loadScript));
 const TYPES = [
   { k: 'NEG_YEAR',        lbl: 'Negative annual total',        c: '#e34948' },
   { k: 'NEG_CORRECTION',  lbl: 'Negative correction entry',    c: '#4a3aa7' },
@@ -2507,14 +2504,14 @@ function applyAreaPolys(polys, label, kind, link) {
 }
 (function aquiferSelect() {
   const sel = $('mxAqSel'), ssel = $('mxStudySel'); if (!sel || !ssel) return;
-  const AQ = ((window.AQUIFER_DATA && window.AQUIFER_DATA.aquifers) || []).slice()
-    .sort((a, b) => (a.n.startsWith('Unnamed') - b.n.startsWith('Unnamed')) || a.n.localeCompare(b.n));
-  let study = null, studyErr = null;
+  let AQ = null, study = null, studyErr = null;
+  AQ_LOAD.then(() => { AQ = ((window.AQUIFER_DATA && window.AQUIFER_DATA.aquifers) || []).slice()
+    .sort((a, b) => (a.n.startsWith('Unnamed') - b.n.startsWith('Unnamed')) || a.n.localeCompare(b.n)); fill(); });
   const pretty = (s) => s.replace(/_/g, ' ');
   function fill() {   // two separate lists: 2D aquifer extents and NMBGMR study areas
     const c1 = sel.value, c2 = ssel.value;
     sel.innerHTML = '<option value="">Select an aquifer…</option>' +
-      (AQ.length ? AQ.map((a, i) => `<option value="a${i}">${esc(pretty(a.n))}${a.cls.length ? ' (' + esc(a.cls.join(', ')) + ')' : ''}</option>`).join('') : '<option disabled>aquifers.js not loaded</option>');
+      (AQ === null ? '<option disabled>Loading aquifers…</option>' : AQ.length ? AQ.map((a, i) => `<option value="a${i}">${esc(pretty(a.n))}${a.cls.length ? ' (' + esc(a.cls.join(', ')) + ')' : ''}</option>`).join('') : '<option disabled>aquifers.js not loaded</option>');
     ssel.innerHTML = '<option value="">Select a study area…</option>' +
       (study && study.length ? study.map((s, i) => `<option value="s${i}">${esc(s.n)} — ${esc(s.status || '')}${s.y0 ? ` ${esc(s.y0)}–${esc(s.y1 || '')}` : ''}</option>`).join('')
         : `<option disabled>${studyErr ? 'Unavailable (' + esc(studyErr) + ')' : 'Loading from maps.nmt.edu…'}</option>`);
@@ -2548,6 +2545,11 @@ function applyAreaPolys(polys, label, kind, link) {
 })();
 
 // ============================== data ==============================
+const loadPill = document.createElement('div'); loadPill.id = 'mxDataLoad';
+loadPill.innerHTML = '⏳ Loading meter &amp; groundwater data… <span class="muted">(map and filters work meanwhile)</span>';
+(document.getElementById('map') || document.body).appendChild(loadPill);
+await DATA_LOAD;
+loadPill.remove();
 const PART2_PROBLEM = !window.DASH_DATA ? null
   : !window.DASH_DATA_2 ? 'dashboard_data_2.js did not load, so groundwater levels are missing. Put dashboard_data_2.js in the same folder as index.html (on GitHub: same folder as index.html in the repo), then hard-refresh (Ctrl+F5).'
   : (window.DASH_DATA_2.built && window.DASH_DATA_2.built !== window.DASH_DATA.built) ? `dashboard_data.js (built ${window.DASH_DATA.built}) and dashboard_data_2.js (built ${window.DASH_DATA_2.built}) are from different builds. Upload both files from the same build, then hard-refresh (Ctrl+F5).` : null;
@@ -3333,8 +3335,15 @@ async function w2wLookup(pid) {
   return j.features?.[0]?.attributes || null;
 }
 let WELL_REQ = 0;
+let WC_LOAD = null, WC_DONE = false;
 function openWell(pr, w2) {
   pr = pr || {};
+  if (!window.WELL_CONSTRUCTION && !WC_DONE) {   // ~7 MB, fetched the first time a schematic is opened
+    $('mx-well').innerHTML = '<div class="mx-empty">⏳ Loading well-construction records…</div>'; showTab('mxwell');
+    const req = ++WELL_REQ;
+    (WC_LOAD ||= loadScript('well_construction.js').then(() => { WC_DONE = true; WC = null; })).then(() => { if (req === WELL_REQ) openWell(pr, w2); });
+    return;
+  }
   const req = ++WELL_REQ;
   const pid = String(pr.pod_file ?? '').trim();
   const num = (v) => { const n = parseFloat(v); return isFinite(n) && n > 0 ? n : null; };
