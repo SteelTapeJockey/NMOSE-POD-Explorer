@@ -3052,6 +3052,40 @@ async function exportMonitoring(kind, fmt, btn) {
 }
 const liveWellsFor = (a) => !S.wlBundled && LIVE.status === 'live' && LIVE.key === areaKey(a) ? LIVE.wells : null;
 
+// ---- cards on the map for rows picked in the Pumping vs. GW levels lists
+function showCard(lat, lon, html) {
+  if (map.getZoom() < 12) map.setView([lat, lon], 12);   // close enough to see the site among its neighbours
+  else if (!map.getBounds().pad(-0.15).contains([lat, lon])) map.panTo([lat, lon]);
+  L.popup({ maxWidth: 320, maxHeight: 300, autoPan: true }).setLatLng([lat, lon]).setContent(html).openOn(map);
+}
+function openWellCard(w) {
+  const a = w.a || [], last = a[a.length - 1], row = (k, v) => v == null || v === '' ? '' : `<tr><th>${k}</th><td>${v}</td></tr>`;
+  showCard(w.lat, w.lon, `<div class="pod-popup"><table>
+    ${row('Monitoring well', esc(w.nm || w.id))}${row('Site ID', esc(w.id))}${row('Source', esc(w.src || ''))}
+    ${row('Aquifer / formation', esc([w.aq, w.fm].filter(Boolean).join(' · ')))}${row('Well depth (ft)', w.wd != null && w.wd !== '' ? esc(String(w.wd)) : '')}
+    ${a.length ? row('Water levels', `${a[0][0]}–${last[0]} (${a.length} yr${a.length === 1 ? '' : 's'}, ${((n) => `${n.toLocaleString()} reading${n === 1 ? '' : 's'}`)(a.reduce((t, q) => t + (q[2] || 0), 0))})`) : ''}
+    ${last ? row('Latest depth to water', `${fmt(last[1])} ft <span class="muted">(${last[0]} median)</span>`) : ''}
+    ${w.trend != null ? row('Trend', `${w.trend > 0 ? '+' : ''}${w.trend.toFixed(2)} ft/yr <span class="muted">(+ = water dropping)</span>`) : ''}
+    ${w.dist != null ? row('Distance', `${w.dist.toFixed(1)} km`) : ''}
+  </table><div class="hint" style="margin-top:4px">Highlighted on the groundwater chart.</div></div>`);
+}
+async function openPodCard(pid) {
+  let f = state.points.find((q) => String(q.properties?.pod_file ?? '').trim() === pid);
+  if (!f) {   // not loaded in the current view - fetch that one POD
+    try {
+      const u = new URL(LAYER_URL + '/query');
+      Object.entries({ f: 'geojson', where: `pod_file = '${pid.replace(/'/g, "''")}'`, outFields: '*', outSR: '4326', resultRecordCount: '1' }).forEach(([k, v]) => u.searchParams.set(k, v));
+      f = (await (await fetch(u, { signal: AbortSignal.timeout(15000) })).json()).features?.[0];
+    } catch (e) { f = null; }
+  }
+  const p = podById.get(pid), c = f?.geometry?.coordinates;
+  const lat = c ? c[1] : p?.lat, lon = c ? c[0] : p?.lon;
+  if (lat == null) return openPod(pid);   // no location on file - fall back to the meter tab
+  selLayer.clearLayers();
+  L.circleMarker([lat, lon], { radius: 15, weight: 3, color: C_SEL, fill: false, interactive: false }).addTo(selLayer);
+  showCard(lat, lon, f ? window.buildPopupHtml(f) : `<div class="pod-popup"><b>${esc(pid)}</b>${p?.own ? ' · ' + esc(p.own) : ''}<button type="button" class="pod-popup-link mx-open" data-pod="${esc(pid)}" style="width:100%;border:none;cursor:pointer;margin-top:6px">📈 Meter readings →</button></div>`);
+}
+
 // ============================== Pumping vs. water levels tab ==============================
 function setArea(a, quiet) {
   if (a.kind === 'poly' && !state.filterPolygon) return;
@@ -3153,7 +3187,7 @@ function renderArea() {
     <div class="mx-callout">${rr == null ? `Not enough overlapping full years in both windows (${xs.length}; need 4 with ≥2 wells measured in consecutive years) to compare pumping with water-level change here.` :
       `Correlation between annual pumping (excl. flagged) and the median year-over-year change in depth to water: <b>r = ${rr.toFixed(2)}</b> over ${xs.length} years (positive = years with more pumping coincide with water dropping more).
       A screening signal only — well depths, aquifers, recharge, lag times and changing metering coverage all affect it.`}</div>
-    <h3>Monitoring wells <span class="hint-inline">(click to highlight)</span></h3>
+    <h3>Monitoring wells <span class="hint-inline">(click to highlight it and show its card on the map)</span></h3>
     <div class="mx-ctrl" style="margin:2px 0 6px">Export from the NM water data API, in its schema:
       <button class="small mx-gwx" data-k="ts" data-f="geojson">⬇ Raw water levels (GeoJSON)</button><button class="small mx-gwx" data-k="ts" data-f="csv">⬇ Raw (CSV)</button>
       <button class="small mx-gwx" data-k="sites" data-f="geojson">⬇ Wells (GeoJSON)</button><button class="small mx-gwx" data-k="sites" data-f="csv">⬇ Wells (CSV)</button>
@@ -3162,7 +3196,7 @@ function renderArea() {
       return xn ? `<div class="hint">${xn.toLocaleString()} reading${xn === 1 ? '' : 's'} at ${xw.length} well${xw.length === 1 ? '' : 's'} can't be placed on the chart (missing or invalid date/value) — listed as-is in the CSV export.</div>` : ''; })()}
     <div class="mx-scroll" style="max-height:260px"><table class="mx-tbl"><thead><tr><th>Well</th><th>Source</th><th>Aquifer / formation</th><th class="num">Depth ft</th>${a.kind === 'radius' ? '<th class="num">Dist km</th>' : ''}<th class="num">Years</th><th class="num">Trend ft/yr</th></tr></thead><tbody id="mxWells">${
       wells.sort((x, y) => (x.dist ?? 0) - (y.dist ?? 0) || y.yrs - x.yrs).slice(0, 400).map((w) => `<tr class="clickable ${w._sel ? 'sel' : ''}" data-w="${w.ix}"><td>${esc(w.nm || w.id)}</td><td>${esc(w.src)}</td><td>${esc(w.aq || '')}${w.fm ? ' · ' + esc(w.fm) : ''}</td><td class="num">${esc(w.wd || '')}</td>${a.kind === 'radius' ? `<td class="num">${w.dist.toFixed(1)}</td>` : ''}<td class="num">${w.y0}–${w.y1} (${w.yrs})</td><td class="num">${w.trend == null ? '—' : (w.trend > 0 ? '+' : '') + w.trend.toFixed(2)}</td></tr>`).join('') || '<tr><td colspan="7" class="muted">No monitoring wells with ≥5 years of data here.</td></tr>'}</tbody></table></div>
-    <h3>Metered PODs <span class="hint-inline">(largest ${lastY ?? ''} pumping first · click for meter readings)</span></h3>
+    <h3>Metered PODs <span class="hint-inline">(largest ${lastY ?? ''} pumping first · click to show its card on the map)</span></h3>
     <div class="mx-scroll" style="max-height:260px"><table class="mx-tbl"><thead><tr><th>POD</th><th>Owner</th><th>Use</th><th class="num">${lastY ?? ''} AF excl. flagged</th><th class="num">As reported</th><th class="num">Anomalies</th></tr></thead><tbody id="mxPods">${
       pods.map((p) => ({ p, v: (p.pu.find((q) => q[0] === lastY) || [0, 0, 0]) })).sort((x, y) => y.v[2] - x.v[2]).slice(0, 300).map(({ p, v }) => {
         const n = sigCount(p.id);
@@ -3230,10 +3264,10 @@ function renderArea() {
   if ($('mxGwZoom')) $('mxGwZoom').onclick = () => map.fitBounds(L.latLng(a.lat, a.lon).toBounds(a.r * 2000));
   if ($('mxUsePoly')) $('mxUsePoly').onclick = () => setArea({ kind: 'poly' });
   $('mx-gw').querySelectorAll('.mx-gwx').forEach((b) => { b.onclick = () => exportMonitoring(b.dataset.k, b.dataset.f, b); });
-  $('mxWells').onclick = (e) => { const tr = e.target.closest('tr[data-w]'); if (tr) { const w = wells.find((q) => q.ix === +tr.dataset.w); if (w) { a.sel = { lat: w.lat, lon: w.lon }; a.well = true; renderArea(); } } };
+  $('mxWells').onclick = (e) => { const tr = e.target.closest('tr[data-w]'); if (tr) { const w = wells.find((q) => q.ix === +tr.dataset.w); if (w) { a.sel = { lat: w.lat, lon: w.lon }; a.well = true; renderArea(); openWellCard(w); } } };
   $('mxWlBundled').onchange = (e) => { S.wlBundled = e.target.checked; LIVE.key = null; renderArea(); };
   if ($('mxWlRetry')) $('mxWlRetry').onclick = () => { LIVE.key = null; renderArea(); };
-  $('mxPods').onclick = (e) => { const tr = e.target.closest('tr[data-p]'); if (tr) openPod(tr.dataset.p); };
+  $('mxPods').onclick = (e) => { const tr = e.target.closest('tr[data-p]'); if (tr) openPodCard(tr.dataset.p); };
 }
 
 let _lastSig = '';
