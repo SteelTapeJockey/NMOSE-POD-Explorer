@@ -214,6 +214,7 @@
 .leaflet-container a.pod-popup-link, .leaflet-container a.pod-popup-link:visited, button.pod-popup-link { color: var(--accent-ink); background: var(--accent); }
 .leaflet-container a.pod-popup-link:hover, button.pod-popup-link:hover { color: var(--accent-ink); background: var(--accent); filter: brightness(1.15); }
 #mxDataLoad{position:absolute;left:50%;bottom:16px;transform:translateX(-50%);z-index:1000;background:#fff;border-radius:16px;padding:6px 14px;font-size:12.5px;box-shadow:0 1px 6px rgba(0,0,0,.25);pointer-events:none}
+.mx-arealay{font-size:12.5px;margin-top:3px}
 </style>
 </head>
 <body>
@@ -413,7 +414,7 @@
     <div class="hint">Only PODs completed within the date range above, and inside any drawn/place area, are ever shown. The chart and summary stats on the Stats &amp; Chart tab update once playback stops or pauses, not on every frame, to keep the animation smooth.</div>
 
     <div class="filter-section-title" style="margin-top:18px">Export animation</div>
-    <div class="hint" style="margin-top:2px">Renders every step of the <em>current</em> range/step/mode as a downloadable GIF — a simplified, points-only view (no street/satellite basemap; browsers won't allow capturing map tiles from a different site into an image). The drawn/place area outline is included when one's active.</div>
+    <div class="hint" style="margin-top:2px">Renders every step of the <em>current</em> range/step/mode as a downloadable GIF — drawn on the basemap currently selected on the map (Topographic, Satellite, Streets…). The drawn/place area outline is included when one's active.</div>
     <button id="exportGifBtn" class="small" style="width:100%;margin-top:6px">⬇ Export as GIF</button>
     <div class="hint" id="gifExportStatus" style="margin-top:4px"></div>
     </div>
@@ -1068,9 +1069,45 @@ function makeProjection(bbox, w, h, pad) {
   const offY = pad + (usableH - spanY * scale) / 2;
   return (lon, lat) => [offX + (lon - bbox.minLon) * lonScale * scale, offY + (bbox.maxLat - lat) * scale];
 }
+let GIF_BASEMAP = null;
+function mercXY(lon, lat) {   // Web Mercator at zoom 0 (world = 256 px), same as the map tiles
+  const s = Math.sin(Math.max(-85, Math.min(85, lat)) * Math.PI / 180);
+  return [(lon + 180) / 360 * 256, (0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)) * 256];
+}
+function makeMercProjection(bbox, w, h, pad) {
+  const [x0, y1] = mercXY(bbox.minLon, bbox.minLat), [x1, y0] = mercXY(bbox.maxLon, bbox.maxLat);
+  const spanX = Math.max(x1 - x0, 1e-6), spanY = Math.max(y1 - y0, 1e-6), uw = w - pad * 2, uh = h - pad * 2;
+  const scale = Math.min(uw / spanX, uh / spanY);
+  const offX = pad + (uw - spanX * scale) / 2 - x0 * scale, offY = pad + (uh - spanY * scale) / 2 - y0 * scale;
+  const project = (lon, lat) => { const [x, y] = mercXY(lon, lat); return [offX + x * scale, offY + y * scale]; };
+  project.merc = { scale, offX, offY };
+  return project;
+}
+async function renderGifBasemap(project, w, h) {
+  const key = document.getElementById('basemapSelect')?.value, def = BASEMAPS[key] || BASEMAPS.topo;
+  const { scale, offX, offY } = project.merc;
+  const z = Math.max(1, Math.min(def.maxZoom || 16, Math.ceil(Math.log2(scale)))), n = 2 ** z, ts = 256 * scale / n;
+  const wx0 = -offX / scale, wx1 = (w - offX) / scale, wy0 = -offY / scale, wy1 = (h - offY) / scale;
+  const tx0 = Math.floor(wx0 * n / 256), tx1 = Math.floor(wx1 * n / 256), ty0 = Math.max(0, Math.floor(wy0 * n / 256)), ty1 = Math.min(n - 1, Math.floor(wy1 * n / 256));
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const g = c.getContext('2d'); g.fillStyle = '#f7f5f0'; g.fillRect(0, 0, w, h);
+  const jobs = [];
+  for (let tx = tx0; tx <= tx1; tx++) for (let ty = ty0; ty <= ty1; ty++) {
+    const url = def.url.replace('{z}', z).replace('{y}', ty).replace('{x}', ((tx % n) + n) % n);
+    jobs.push(new Promise((res) => { const im = new Image(); im.crossOrigin = 'anonymous';
+      im.onload = () => { g.drawImage(im, offX + tx * ts, offY + ty * ts, ts + 0.5, ts + 0.5); res(true); };
+      im.onerror = () => res(false); im.src = url; setTimeout(() => res(false), 20000); }));
+  }
+  const ok = (await Promise.all(jobs)).filter(Boolean).length;
+  if (!ok) { toast('Could not load the basemap for the GIF — exporting on a plain background.'); return null; }
+  try { g.getImageData(0, 0, 1, 1); } catch (e) { return null; }   // tiles not shareable - fall back
+  g.font = '10px system-ui, sans-serif'; const aw = g.measureText('Basemap: Esri').width + 10;
+  g.fillStyle = 'rgba(255,255,255,.8)'; g.fillRect(w - aw, h - 16, aw, 16); g.fillStyle = '#333'; g.fillText('Basemap: Esri', w - aw + 5, h - 5);
+  return c;
+}
 function drawGifFrame(ctx, w, h, project, points, label, totalCount) {
-  ctx.fillStyle = '#f7f5f0';
-  ctx.fillRect(0, 0, w, h);
+  if (GIF_BASEMAP) ctx.drawImage(GIF_BASEMAP, 0, 0);
+  else { ctx.fillStyle = '#f7f5f0'; ctx.fillRect(0, 0, w, h); }
   if (state.filterPolygon) {
     ctx.strokeStyle = '#ff6600';
     ctx.lineWidth = 2;
@@ -1090,9 +1127,11 @@ function drawGifFrame(ctx, w, h, project, points, label, totalCount) {
     const [x, y] = project(c[0], c[1]);
     ctx.fillStyle = pointColor(f.properties || {});
     ctx.beginPath();
-    ctx.arc(x, y, 2.6, 0, Math.PI * 2);
+    ctx.arc(x, y, 2.8, 0, Math.PI * 2);
     ctx.fill();
+    if (GIF_BASEMAP) { ctx.strokeStyle = 'rgba(255,255,255,.9)'; ctx.lineWidth = 0.9; ctx.stroke(); }
   }
+  if (GIF_BASEMAP) { ctx.fillStyle = 'rgba(255,255,255,.85)'; ctx.fillRect(8, 8, ctx.measureText ? Math.max(90, label.length * 13 + 20) : 120, 34); ctx.fillRect(8, h - 30, w - 110, 22); }
   ctx.fillStyle = '#1c1c1c';
   ctx.font = 'bold 22px system-ui, sans-serif';
   ctx.fillText(label, 16, 32);
@@ -1149,7 +1188,9 @@ async function exportAnimationGIF() {
     bbox.minLat = Math.min(bbox.minLat, fb.minLat); bbox.maxLat = Math.max(bbox.maxLat, fb.maxLat);
   }
   const W = 640, H = 480;
-  const project = makeProjection(bbox, W, H, 34);
+  const project = makeMercProjection(bbox, W, H, 34);
+  statusEl.textContent = 'Loading basemap…';
+  GIF_BASEMAP = await renderGifBasemap(project, W, H);
   const canvas = document.createElement('canvas');
   canvas.width = W; canvas.height = H;
   const ctx = canvas.getContext('2d');
@@ -2413,8 +2454,11 @@ function updateUndatedNote() {
     <div class="filter-section-title">Draw on the map</div><div id="fpDraw"></div>
     <div class="hint" style="margin-top:4px">Click points on the map, double-click (or Finish) to close. Drag the orange handles to reshape.</div>
     <div class="filter-section-title">Incorporated place</div><div id="fpPlace"></div>
+    <label class="check-item mx-arealay"><input type="checkbox" data-lay="place"> Show all place boundaries on the map</label>
     <div class="filter-section-title">Aquifer <span class="hint-inline">(2D aquifer extents)</span></div><div id="fpAq"></div>
+    <label class="check-item mx-arealay"><input type="checkbox" data-lay="aq"> Show all aquifer extents on the map</label>
     <div class="filter-section-title">Aquifer mapping study area <span class="hint-inline">(NMBGMR, live from maps.nmt.edu)</span></div><div id="fpStudy"></div>
+    <label class="check-item mx-arealay"><input type="checkbox" data-lay="study"> Show all study areas on the map</label>
     <div class="filter-section-title">Search</div><div id="fpSearch"></div>
     <div class="hint" style="margin-top:4px">Street address or place, any POD number (e.g. L-12170) or coordinates (34.80, -106.73). A found location gets a pin with a “pumping vs. water levels within 5 km” button.</div>`;
   const tabs = document.createElement('div'); tabs.id = 'fpTabs';
@@ -2494,11 +2538,14 @@ function applyAreaPolys(polys, label, kind, link) {
   state.map.fitBounds([[bbox.minLat, bbox.minLon], [bbox.maxLat, bbox.maxLon]], { padding: [24, 24] });
   toast(`Filter applied to ${label}.`);
 }
+const AREA = { place: { label: 'Incorporated places', color: '#7b52ab', group: L.layerGroup(), on: false }, aq: { label: '2D aquifer extents', color: '#1f6fb5', group: L.layerGroup(), on: false },
+  study: { label: 'Aquifer mapping study areas', color: '#9a6b00', group: L.layerGroup(), on: false } };
+document.addEventListener('click', (e) => { const b = e.target.closest('.mx-usearea'); if (b) { e.preventDefault(); AREA.use(b.dataset.k, +b.dataset.i); } });
 (function aquiferSelect() {
   const sel = $('mxAqSel'), ssel = $('mxStudySel'); if (!sel || !ssel) return;
   let AQ = null, study = null, studyErr = null;
   AQ_LOAD.then(() => { AQ = ((window.AQUIFER_DATA && window.AQUIFER_DATA.aquifers) || []).slice()
-    .sort((a, b) => (a.n.startsWith('Unnamed') - b.n.startsWith('Unnamed')) || a.n.localeCompare(b.n)); fill(); });
+    .sort((a, b) => (a.n.startsWith('Unnamed') - b.n.startsWith('Unnamed')) || a.n.localeCompare(b.n)); fill(); AREA.rebuild('aq'); });
   const pretty = (s) => s.replace(/_/g, ' ');
   function fill() {   // two separate lists: 2D aquifer extents and NMBGMR study areas
     const c1 = sel.value, c2 = ssel.value;
@@ -2519,7 +2566,7 @@ function applyAreaPolys(polys, label, kind, link) {
         p: f.geometry.type === 'Polygon' ? [f.geometry.coordinates] : f.geometry.type === 'MultiPolygon' ? f.geometry.coordinates : [] }))
         .filter((s) => s.p.length).sort((a, b) => a.n.localeCompare(b.n));
     } catch (e) { studyErr = e.name === 'TimeoutError' ? 'timed out' : 'could not reach maps.nmt.edu'; }
-    fill();
+    fill(); AREA.rebuild('study');
   })();
   sel.onchange = () => {
     const v = sel.value; if (!v) { if (state.filterPolygon?.kind === 'aquifer') clearFilter(); return; }
@@ -2528,6 +2575,41 @@ function applyAreaPolys(polys, label, kind, link) {
   ssel.onchange = () => {
     const v = ssel.value; if (!v) { if (state.filterPolygon?.kind === 'study') clearFilter(); return; }
     const s = study[+v.slice(1)]; applyAreaPolys(s.p, `${s.n} study area`, 'study', s.link); sel.value = ''; ssel.value = v;
+  };
+  // ---- map overlays of every selectable area (toggled under each picker). Drawn on the explorer's shared canvas
+  //      and pushed to the back so POD points stay clickable; clicking an outline offers "Use as area filter".
+  const pretty2 = (s) => s.replace(/_/g, ' ');
+  const sources = {
+    place: () => ((typeof PLACE_DATA !== 'undefined' && PLACE_DATA.places) || []).map((p) => ({ n: p.n, sub: p.c ? `${p.c} County` : '', p: p.p })),
+    aq: () => (AQ || []).map((a) => ({ n: pretty2(a.n) + ' aquifer', sub: a.cls.join(', '), p: a.p })),
+    study: () => (study || []).map((s) => ({ n: s.n + ' study area', sub: [s.status, s.y0 && `${s.y0}–${s.y1 || ''}`].filter(Boolean).join(' · '), p: s.p })),
+  };
+  const ll = (rings) => rings.map((r) => r.map(([x, y]) => [y, x]));
+  function buildLayer(k) {
+    const g = AREA[k].group; g.clearLayers();
+    sources[k]().forEach((it, i) => {
+      if (!it.p || !it.p.length) return;
+      L.polygon(it.p.map(ll), { color: AREA[k].color, weight: 1.6, opacity: 0.9, fillColor: AREA[k].color, fillOpacity: 0.07 })
+        .bindTooltip(`<b>${esc(it.n)}</b>${it.sub ? '<br>' + esc(it.sub) : ''}`, { sticky: true })
+        .on('click', (e) => { L.DomEvent.stopPropagation(e);
+          L.popup({ maxWidth: 280 }).setLatLng(e.latlng).setContent(`<div class="pod-popup"><b>${esc(it.n)}</b>${it.sub ? `<div class="muted">${esc(it.sub)}</div>` : ''}<button type="button" class="pod-popup-link mx-usearea" data-k="${k}" data-i="${i}" style="width:100%;border:none;cursor:pointer;margin-top:6px">Use as area filter →</button></div>`).openOn(state.map); })
+        .addTo(g);
+    });
+    AREA[k].built = true;
+  }
+  function syncArea(k) {
+    const on = AREA[k].on, m = state.map;
+    if (on && !AREA[k].built) buildLayer(k);
+    if (on) { m.addLayer(AREA[k].group); AREA[k].group.eachLayer((l) => l.bringToBack()); } else m.removeLayer(AREA[k].group);
+    if (window.MX) renderLegend();
+  }
+  document.querySelectorAll('.mx-arealay input').forEach((cb) => cb.addEventListener('change', () => { AREA[cb.dataset.lay].on = cb.checked; syncArea(cb.dataset.lay); }));
+  AREA.rebuild = (k) => { AREA[k].built = false; if (AREA[k].on) syncArea(k); };
+  AREA.use = (k, i) => {
+    const it = sources[k]()[i]; if (!it) return; state.map.closePopup();
+    if (k === 'place') { const ps = $('placeFilterSelect'); if (ps) ps.value = it.n; applyPlaceFilter(it.n); }
+    else if (k === 'aq') { sel.value = 'a' + i; sel.onchange(); }
+    else { ssel.value = 's' + i; ssel.onchange(); }
   };
   // keep the dropdowns consistent with the explorer's own filter controls
   const reset = () => { sel.value = ''; ssel.value = ''; };
@@ -2659,7 +2741,8 @@ function syncLayers() {
 const LEG = { open: true };
 function renderLegend() {
   const on = $('mxAnomLayer').checked, wl = $('mxWellLayer').checked, el = $('mxLegend');
-  if (!on && !wl) { el.style.display = 'none'; return; }
+  const areas = ['place', 'aq', 'study'].filter((k) => AREA[k].on);
+  if (!on && !wl && !areas.length) { el.style.display = 'none'; return; }
   const present = new Set(S.rows.map((a) => a.t));
   let h = '';
   if (on) {
@@ -2667,6 +2750,8 @@ function renderLegend() {
     TYPES.filter((t) => !t.minor && present.has(t.k)).forEach((t) => h += `<div class="li">${sw(t.c)}${esc(t.lbl)}</div>`);
     if (TYPES.some((t) => t.minor && present.has(t.k))) h += `<div class="li">${sw(C_DOT)}Minor anomaly only</div>`;
   }
+  areas.forEach((k) => { h += `<div class="li">${sw(AREA[k].color + '22', `box-shadow:inset 0 0 0 2px ${AREA[k].color};border-radius:2px`)}${AREA[k].label}</div>`; });
+  if (areas.length) h += '<div class="muted" style="font-size:11px;margin:0 0 3px">Click an outline to use it as the area filter</div>';
   if (wl) h += `<div class="li">${sw('#fff', `box-shadow:0 0 0 2px ${C_WELL}`)}Monitoring well (water levels${S.wlMinYears > 1 ? `, ≥${S.wlMinYears} yrs` : ''})</div>`;
   el.innerHTML = `<div class="lg-head" title="Show/hide legend" style="cursor:pointer;user-select:none;display:flex;align-items:center;gap:6px;font-weight:700;font-size:11.5px"><span>${LEG.open ? '▾' : '▸'}</span><span>Legend</span></div>` + (LEG.open ? '<div style="margin-top:4px">' + h + '</div>' : ''); el.style.display = '';
   el.onclick = (e) => { if (e.target.closest('.lg-head')) { LEG.open = !LEG.open; renderLegend(); } };
