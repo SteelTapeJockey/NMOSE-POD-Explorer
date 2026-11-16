@@ -557,7 +557,13 @@ function mapViewBbox() {
   const b = state.map.getBounds();
   return { minLon: b.getWest(), minLat: b.getSouth(), maxLon: b.getEast(), maxLat: b.getNorth() };
 }
-function queryBboxForView() { return bboxIntersect(mapViewBbox(), NM_BBOX); }
+function queryBboxForView() {
+  // With a clipped area filter active, fetch only the part of the view the area covers - a county or
+  // study area in a busy view no longer trips the "too many points" limit for points it would hide anyway.
+  const v = bboxIntersect(mapViewBbox(), NM_BBOX), f = state.filterPolygon;
+  if (v && f && f.bbox && state.clipToArea) return bboxIntersect(v, f.bbox) || v;
+  return v;
+}
 function ptInRing(lng, lat, ring) {
   let inside = false;
   for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
@@ -2945,6 +2951,7 @@ bringOverlaysToFront = function () {   // explorer markers reload on every pan; 
   if (map.hasLayer(anomLayer)) anomLayer.eachLayer((m) => m.bringToFront());
 }
 function syncLayers() {
+  if (S.area && S.lastAreaWells) drawAreaOnMap(S.lastAreaWells);
   map[$('mxAnomLayer').checked ? 'addLayer' : 'removeLayer'](anomLayer);
   map[$('mxWellLayer').checked ? 'addLayer' : 'removeLayer'](wellLayer);
   bringOverlaysToFront(); renderLegend();
@@ -2970,8 +2977,12 @@ function renderLegend() {
 
 // ============================== explorer hooks ==============================
 const _applyPolygonStyling = window.applyPolygonStyling;
+let _areaKey = '', _areaReload = null;
+map.on('movestart', () => clearTimeout(_areaReload));   // a map move reloads the view itself
 window.applyPolygonStyling = function () {
   _applyPolygonStyling.apply(this, arguments);
+  const f = state.filterPolygon, key = f && state.clipToArea ? JSON.stringify(f.bbox) : '';
+  if (key !== _areaKey) { _areaKey = key; clearTimeout(_areaReload); _areaReload = setTimeout(() => loadForCurrentView(), 400); }
   applyFilters();
   if (state.filterPolygon && (!S.area || S.area.kind === 'poly')) setArea({ kind: 'poly' }, true);
   else if (!state.filterPolygon && S.area && S.area.kind === 'poly') clearArea();
@@ -3403,10 +3414,11 @@ function areaMembers() {
   return { pods, wells };
 }
 function drawAreaOnMap(wells) {
-  areaLayer.clearLayers();
+  areaLayer.clearLayers(); S.lastAreaWells = wells;
   const a = S.area; if (!a) return;
   if (a.kind === 'radius') L.circle([a.lat, a.lon], { radius: a.r * 1000, color: C_SEL, weight: 2, fillOpacity: .05, interactive: false }).addTo(areaLayer);
-  (wells || []).forEach((w) => L.circleMarker([w.lat, w.lon], { radius: 6.5, weight: 2, color: w._sel ? C_SEL : C_WELL, fill: false })
+  const showAll = $('mxWellLayer').checked;   // with the well layer off, only the highlighted well is marked
+  (wells || []).filter((w) => showAll || w._sel).forEach((w) => L.circleMarker([w.lat, w.lon], w._sel ? { radius: 7, weight: 2.5, color: C_SEL, fill: false } : { radius: 4.5, weight: 1.5, color: C_WELL, opacity: 0.85, fill: false })
     .on('click', (e) => { L.DomEvent.stopPropagation(e); a.sel = { lat: w.lat, lon: w.lon }; a.well = true; renderArea(); })
     .bindTooltip(`<b>${esc(w.nm || w.id)}</b> · ${esc(w.src || '')}<br>${w.a.length} yrs of water levels · click to highlight`).addTo(areaLayer));
 }
