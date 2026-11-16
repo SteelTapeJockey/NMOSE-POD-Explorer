@@ -46,6 +46,10 @@
   #drawControls { display: none; gap: 6px; align-items: center; background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 7px 10px; box-shadow: 0 4px 14px rgba(0,0,0,.22); }
   #placeFilterSelect { background: var(--surface-1); border: 1px solid var(--border); border-radius: 999px; padding: 9px 14px; font-size: 13px; font-weight: 600; box-shadow: 0 3px 10px rgba(0,0,0,.15); }
   #loadingBadge { position: absolute; top: 12px; left: 12px; z-index: 900; display: none; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-2); background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; }
+  #mxWellToggle { position: absolute; top: 12px; right: 170px; z-index: 950; display: inline-flex; align-items: center; gap: 7px; background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 3px 10px rgba(0,0,0,.2); padding: 8px 12px; font: inherit; font-size: 12.5px; font-weight: 600; color: var(--ink-1); cursor: pointer; }
+  #mxWellToggle .dot { width: 11px; height: 11px; border-radius: 50%; background: #fff; box-shadow: 0 0 0 2px #2b4a6b; }
+  #mxWellToggle.on { background: #2b4a6b; color: #fff; border-color: #2b4a6b; }
+  #mxWellToggle.on .dot { box-shadow: 0 0 0 2px #fff; }
   #basemapControl { position: absolute; top: 12px; right: 12px; z-index: 950; background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 3px 10px rgba(0,0,0,.2); padding: 2px 4px; }
   #basemapSelect { border: none; background: transparent; font: inherit; font-size: 12.5px; font-weight: 600; color: var(--ink-1); padding: 6px 4px; cursor: pointer; }
   #basemapSelect:focus { outline: none; }
@@ -281,7 +285,7 @@
     <div id="mxLayers">
       <div class="filter-section-title" style="margin-top:18px">Meter &amp; groundwater layers</div>
       <label class="check-item" style="font-size:12.5px"><input type="checkbox" id="mxAnomLayer"> PODs with meter-reading anomalies</label>
-      <label class="check-item" style="font-size:12.5px"><input type="checkbox" id="mxWellLayer" checked> Groundwater monitoring wells</label>
+      <label class="check-item" style="font-size:12.5px"><input type="checkbox" id="mxWellLayer"> Groundwater monitoring wells</label>
       <div class="mx-ctrl" style="font-size:12.5px;margin:2px 0 0 22px">Min. years of water levels <input type="number" id="mxWlMinYears" value="1" min="1" style="width:56px;font-size:12px;padding:2px 5px"> <span class="muted">(1 = every well; also applies to Pumping vs. GW levels)</span></div>
       <div class="hint">Types, years and size are set on the <a href="#" id="mxOpenAnoms">Meter anomalies</a> tab. Any POD popup has a <b>📈 Meter readings</b> button when meter data exists.</div>
     </div>
@@ -314,6 +318,7 @@
     </div>
     <div id="mxLegend" style="display:none"></div>
     <div id="loadingBadge"><span class="spin"></span> <span id="loadingText">Loading points of diversion…</span></div>
+    <button type="button" id="mxWellToggle" title="Show or hide groundwater monitoring wells on the map"><span class="dot"></span> Monitoring wells: <b>Off</b></button>
     <div id="basemapControl" title="Choose a basemap">
       <select id="basemapSelect">
         <option value="topo" selected>Topographic</option>
@@ -1189,7 +1194,6 @@ async function exportAnimationGIF() {
     const props = f.properties || {};
     if (state.statusFilter && !state.statusFilter.has(codeOf(props.status))) return false;
     if (state.useFilter && !state.useFilter.has(codeOf(props.use))) return false;
-    if (!pointInFilter(f)) return false;
     if (window.mxPodDepthOk && !window.mxPodDepthOk(props.depth_well, props.depth_water)) return false;
     const c = f.geometry && f.geometry.coordinates;
     if (!c || !vb.contains([c[1], c[0]])) return false;
@@ -3584,6 +3588,12 @@ onExplorerFilters = function () {   // status/use filter changes -> pumping vs. 
 function part2Banner() { return PART2_PROBLEM ? `<div class="mx-callout" style="border-left-color:#b42318;background:#fdecea"><b>Data file problem:</b> ${esc(PART2_PROBLEM)}</div>` : ''; }
 // ============================== start ==============================
 ['mxAnomLayer', 'mxWellLayer'].forEach((id) => $(id).onchange = syncLayers);
+(function wellToggle() {   // on-map button and the Filters-tab checkbox drive the same layer
+  const b = $('mxWellToggle'), cb = $('mxWellLayer'); if (!b || !cb) return;
+  const paint = () => { b.classList.toggle('on', cb.checked); b.querySelector('b').textContent = cb.checked ? 'On' : 'Off'; };
+  b.onclick = () => { cb.checked = !cb.checked; syncLayers(); paint(); };
+  cb.addEventListener('change', paint); paint();
+})();
 (function podGeojson() {
   const ref = $('attrExportHint'); if (!ref) return;
   const b = document.createElement('button'); b.className = 'small'; b.style.cssText = 'width:100%;margin-top:6px';
