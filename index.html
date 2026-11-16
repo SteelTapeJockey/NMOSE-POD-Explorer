@@ -454,6 +454,7 @@
     <div class="row" style="margin-top:8px;gap:8px;flex-wrap:wrap;align-items:center;font-size:12.5px">
       <label>Frame <select id="gifExtent" style="font-size:12px;padding:2px 4px"><option value="area" selected>Fit to selected area</option><option value="view">Current map view</option></select></label>
       <label>Size <select id="gifSize" style="font-size:12px;padding:2px 4px"><option value="1280" selected>2× (1280 px wide)</option><option value="1920">3× (1920 px wide)</option><option value="640">1× (640 px wide)</option></select></label>
+      <label>Basemap text <select id="gifText" style="font-size:12px;padding:2px 4px"><option value="1" selected>Standard</option><option value="2">Large (2×, fewer small labels)</option></select></label>
       <label>Seconds per frame <input type="number" id="gifFrameSec" value="0.5" min="0.05" max="10" step="0.05" style="width:64px;font-size:12px;padding:2px 5px"></label>
       <label>Hold last frame (s) <input type="number" id="gifLastSec" value="1.8" min="0" max="30" step="0.1" style="width:64px;font-size:12px;padding:2px 5px"></label>
     </div>
@@ -1121,6 +1122,7 @@ function makeProjection(bbox, w, h, pad) {
   return (lon, lat) => [offX + (lon - bbox.minLon) * lonScale * scale, offY + (bbox.maxLat - lat) * scale];
 }
 let GIF_BASEMAP = null, GIF_LEGEND = null, GIF_TEXT_BOOST = 1;
+document.addEventListener('change', (e) => { if (e.target && e.target.id === 'gifSize') { const t = document.getElementById('gifText'); if (t) t.value = e.target.value === '1920' ? '2' : '1'; } });
 function mercXY(lon, lat) {   // Web Mercator at zoom 0 (world = 256 px), same as the map tiles
   const s = Math.sin(Math.max(-85, Math.min(85, lat)) * Math.PI / 180);
   return [(lon + 180) / 360 * 256, (0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)) * 256];
@@ -1273,15 +1275,14 @@ async function exportAnimationGIF() {
 
   const bbox = { minLon: vb.getWest(), minLat: vb.getSouth(), maxLon: vb.getEast(), maxLat: vb.getNorth() };
   const targetW = Math.max(640, Math.min(1920, parseInt(document.getElementById('gifSize')?.value, 10) || 1280));
-  GIF_TEXT_BOOST = targetW >= 1920 ? 2 : 1;   // 3x: basemap tiles one zoom coarser, drawn twice as large
+  GIF_TEXT_BOOST = document.getElementById('gifText')?.value === '2' ? 2 : 1;   // Large: basemap tiles one zoom coarser, drawn twice as large
   let W, H;
   if (fitArea) {
     // Frame the area tightly and pick a size where the basemap is drawn at exactly its own scale
     // (no shrinking or resampling), so its labels stay crisp and readable. Width lands near the chosen size.
     const [x0, y1] = mercXY(bbox.minLon, bbox.minLat), [x1, y0] = mercXY(bbox.maxLon, bbox.maxLat);
-    const boost = targetW >= 1920 ? 2 : 1;
-    let z = Math.round(Math.log2(targetW / (x1 - x0) / boost));
-    const dims = (zz) => [Math.round((x1 - x0) * 2 ** zz * boost / 2) * 2, Math.round((y1 - y0) * 2 ** zz * boost / 2) * 2];
+    let z = Math.round(Math.log2(targetW / (x1 - x0)));
+    const dims = (zz) => [Math.round((x1 - x0) * 2 ** zz / 2) * 2, Math.round((y1 - y0) * 2 ** zz / 2) * 2];
     while (Math.max(...dims(z)) > 2400 && z > 1) z--;
     while (Math.max(...dims(z)) < 480) z++;
     [W, H] = dims(z);
