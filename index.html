@@ -595,11 +595,11 @@ function pointInFilter(feature) {
 }
 
 /* ============================== ArcGIS layer ============================== */
-const PAGE_SIZE = 2000; // matches this service's Max Record Count
+const PAGE_SIZE = 5000; // matches GIS_WATERS_PODs' max record count (fewer requests per view)
 // Above this many matching records in the current view, we don't attempt to load/render them
 // all — that many raw points would be slow to fetch and would choke the browser regardless of
 // clustering. The person is told to zoom in or draw a smaller area instead.
-const VIEW_SOFT_CAP = 60000;
+const VIEW_SOFT_CAP = 100000;
 function bboxGeometryParam(bbox) {
   return JSON.stringify({ xmin: bbox.minLon, ymin: bbox.minLat, xmax: bbox.maxLon, ymax: bbox.maxLat, spatialReference: { wkid: 4326 } });
 }
@@ -687,7 +687,7 @@ function setBasemap(key) {
 function initMap() {
   // Canvas renderer draws circle markers on one <canvas> instead of one SVG element each —
   // much faster at thousands of points, which matters now that nothing is clustered.
-  const map = L.map('map', { zoomControl: true, renderer: L.canvas() }).fitBounds([[NM_BBOX.minLat, NM_BBOX.minLon], [NM_BBOX.maxLat, NM_BBOX.maxLon]]);
+  const map = L.map('map', { zoomControl: true, renderer: L.canvas(), zoomSnap: 0.25, zoomDelta: 0.5, wheelPxPerZoomLevel: 180 }).fitBounds([[NM_BBOX.minLat, NM_BBOX.minLon], [NM_BBOX.maxLat, NM_BBOX.maxLon]]);
   state.map = map;
   setBasemap('topo');
   state.markerLayer = L.layerGroup().addTo(map);
