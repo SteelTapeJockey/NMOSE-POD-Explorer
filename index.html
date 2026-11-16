@@ -1203,9 +1203,12 @@ async function exportAnimationGIF() {
   });
   if (!allAnimated.length) { toast('No PODs in the current map view match the filters within this date range.'); return; }
 
+  // One frame per period with no gaps or overlaps: from..from+step-1, from+step..from+2*step-1, ... ending at `to`.
+  // (Before, the first frame already ended at from+step and only the end year was labelled, so periods looked skipped.)
   const steps = [];
-  for (let y = from; y < to; y += step) steps.push(Math.min(y + step, to));
-  if (!steps.length || steps[steps.length - 1] < to) steps.push(to);
+  for (let y = from; y <= to; y += step) steps.push({ start: y, end: Math.min(y + step - 1, to) });
+  // a single leftover year is folded into the last full period (e.g. 2021-2026 instead of 2021-2025 + 2026)
+  if (step > 1 && steps.length > 1 && steps[steps.length - 1].start === steps[steps.length - 1].end) { steps[steps.length - 2].end = steps.pop().end; }
   if (steps.length > 120) { toast('That\u2019s a lot of frames for a 1-year step over this range — try 5 or 10 years for GIF export.'); return; }
 
   btn.disabled = true;
@@ -1242,11 +1245,12 @@ async function exportAnimationGIF() {
   }
   const gif = new GIF({ workers: Math.min(4, navigator.hardwareConcurrency || 2), quality: 10, width: W, height: H, workerScript: workerScriptUrl });
 
-  steps.forEach((cursor, i) => {
-    const visible = allAnimated.filter(f => pointVisibleAtCursor(f, cursor, from, to, mode, step));
-    const label = mode === 'window'
-      ? (Math.max(from, cursor - step + 1) === cursor ? String(cursor) : `${Math.max(from, cursor - step + 1)}\u2013${cursor}`)
-      : String(cursor);
+  const yearOf = (f) => { const d = parseSaneDate((f.properties || {}).finish_date); return d ? d.getFullYear() : null; };
+  steps.forEach(({ start, end }, i) => {
+    const lo = mode === 'window' ? start : from;
+    const visible = allAnimated.filter((f) => { const y = yearOf(f); return y !== null && y >= lo && y <= end; });
+    const span = start === end ? String(start) : `${start}\u2013${end}`;
+    const label = mode === 'window' ? span : (from === end ? String(end) : `${from}\u2013${end}`);
     drawGifFrame(ctx, W, H, project, visible, label, allAnimated.length);
     const secOf = (id, def, lo, hi) => { const v = parseFloat(document.getElementById(id)?.value); return Math.round(Math.min(hi, Math.max(lo, isFinite(v) ? v : def)) * 1000); };
     gif.addFrame(ctx, { copy: true, delay: i === steps.length - 1 ? Math.max(secOf('gifFrameSec', 0.5, 0.05, 10), secOf('gifLastSec', 1.8, 0, 30)) : secOf('gifFrameSec', 0.5, 0.05, 10) });
