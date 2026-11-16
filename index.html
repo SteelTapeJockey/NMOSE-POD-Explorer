@@ -1106,7 +1106,7 @@ function makeProjection(bbox, w, h, pad) {
   const offY = pad + (usableH - spanY * scale) / 2;
   return (lon, lat) => [offX + (lon - bbox.minLon) * lonScale * scale, offY + (bbox.maxLat - lat) * scale];
 }
-let GIF_BASEMAP = null;
+let GIF_BASEMAP = null, GIF_LEGEND = null;
 function mercXY(lon, lat) {   // Web Mercator at zoom 0 (world = 256 px), same as the map tiles
   const s = Math.sin(Math.max(-85, Math.min(85, lat)) * Math.PI / 180);
   return [(lon + 180) / 360 * 256, (0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)) * 256];
@@ -1170,6 +1170,24 @@ function drawGifFrame(ctx, w, h, project, points, label, totalCount) {
     if (GIF_BASEMAP) { ctx.strokeStyle = 'rgba(255,255,255,.9)'; ctx.lineWidth = 0.9 * k; ctx.stroke(); }
   }
   if (GIF_BASEMAP) { ctx.fillStyle = 'rgba(255,255,255,.85)'; ctx.fillRect(8 * k, 8 * k, Math.max(90, label.length * 13 + 20) * k, 34 * k); ctx.fillRect(8 * k, h - 30 * k, w - 110 * k, 22 * k); }
+  if (GIF_LEGEND && GIF_LEGEND.items.length) {   // top uses for the exported period, bottom left
+    const L = GIF_LEGEND, rowH = 20 * k, pad = 10 * k, titleH = 20 * k;
+    ctx.font = `${Math.round(12 * k)}px system-ui, sans-serif`;
+    const rows = L.items.map((it) => `${it.label}  (${it.n.toLocaleString()})`);
+    if (L.other) rows.push(`Other uses  (${L.other.toLocaleString()})`);
+    ctx.font = `bold ${Math.round(12 * k)}px system-ui, sans-serif`; let tw = ctx.measureText(L.title).width;
+    ctx.font = `${Math.round(12 * k)}px system-ui, sans-serif`; rows.forEach((r) => { tw = Math.max(tw, ctx.measureText(r).width + 20 * k); });
+    const bw = tw + pad * 2, bh = titleH + rows.length * rowH + pad, bx = 8 * k, by = h - 38 * k - bh;
+    ctx.fillStyle = 'rgba(255,255,255,.9)'; ctx.fillRect(bx, by, bw, bh);
+    ctx.fillStyle = '#1c1c1c'; ctx.font = `bold ${Math.round(12 * k)}px system-ui, sans-serif`; ctx.fillText(L.title, bx + pad, by + 16 * k);
+    ctx.font = `${Math.round(12 * k)}px system-ui, sans-serif`;
+    rows.forEach((r, n) => {
+      const cy = by + titleH + n * rowH + rowH / 2 + 2 * k, it = L.items[n];
+      ctx.beginPath(); ctx.arc(bx + pad + 5 * k, cy - 4 * k, 5 * k, 0, Math.PI * 2);
+      ctx.fillStyle = it ? it.color : '#b0b0b0'; ctx.fill(); ctx.strokeStyle = 'rgba(255,255,255,.9)'; ctx.lineWidth = 1 * k; ctx.stroke();
+      ctx.fillStyle = '#333'; ctx.fillText(r, bx + pad + 16 * k, cy);
+    });
+  }
   ctx.fillStyle = '#1c1c1c';
   ctx.font = `bold ${Math.round(22 * k)}px system-ui, sans-serif`;
   ctx.fillText(label, 16 * k, 32 * k);
@@ -1202,6 +1220,10 @@ async function exportAnimationGIF() {
     return y !== null && y >= from && y <= to;
   });
   if (!allAnimated.length) { toast('No PODs in the current map view match the filters within this date range.'); return; }
+  { const cnt = new Map(); allAnimated.forEach((f) => { const c = codeOf((f.properties || {}).use); cnt.set(c, (cnt.get(c) || 0) + 1); });
+    const top = [...cnt.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
+    GIF_LEGEND = { title: `Top uses, ${from}\u2013${to}`, items: top.map(([c, n]) => ({ label: useLabel(c), color: useColor(c), n })),
+      other: allAnimated.length - top.reduce((t, [, n]) => t + n, 0) }; }
 
   // One frame per period with no gaps or overlaps: from..from+step-1, from+step..from+2*step-1, ... ending at `to`.
   // (Before, the first frame already ended at from+step and only the end year was labelled, so periods looked skipped.)
