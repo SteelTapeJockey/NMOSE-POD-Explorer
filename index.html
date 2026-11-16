@@ -1189,17 +1189,18 @@ function drawGifFrame(ctx, w, h, project, points, label, totalCount) {
   const bh = gifBandHeight(w), y0 = h;
   ctx.fillStyle = '#ffffff'; ctx.fillRect(0, y0, w, bh);
   ctx.fillStyle = '#d9d9d9'; ctx.fillRect(0, y0, w, Math.max(1, k));
-  ctx.fillStyle = '#1c1c1c'; ctx.font = `bold ${Math.round(26 * k)}px system-ui, sans-serif`; ctx.fillText(label, 14 * k, y0 + 34 * k);
+  const big = totalCount == null;   // cumulative: the single end year is drawn larger
+  ctx.fillStyle = '#1c1c1c'; ctx.font = `bold ${Math.round((big ? 42 : 26) * k)}px system-ui, sans-serif`; ctx.fillText(label, 14 * k, y0 + (big ? 46 : 34) * k);
   ctx.fillStyle = '#555'; ctx.font = `${Math.round(12 * k)}px system-ui, sans-serif`;
-  ctx.fillText(`${points.length.toLocaleString()} of ${totalCount.toLocaleString()} PODs shown`, 14 * k, y0 + 54 * k);
+  ctx.fillText(totalCount == null ? `${points.length.toLocaleString()} PODs shown` : `${points.length.toLocaleString()} of ${totalCount.toLocaleString()} PODs shown`, 14 * k, y0 + (big ? 66 : 54) * k);
   if (GIF_LEGEND && GIF_LEGEND.items.length) {
-    const L = GIF_LEGEND, rows = L.items.map((it) => ({ t: `${it.label}  (${it.n.toLocaleString()})`, c: it.color }));
+    const L = GIF_LEGEND, rows = L.items.map((it) => ({ t: it.n == null ? it.label : `${it.label}  (${it.n.toLocaleString()})`, c: it.color }));
     if (L.other) rows.push({ t: `Other uses  (${L.other.toLocaleString()})`, c: '#b0b0b0' });
     const perCol = rows.length, lx = w * 0.36, colW = w - lx - 10 * k;
-    ctx.fillStyle = '#1c1c1c'; ctx.font = `bold ${Math.round(12 * k)}px system-ui, sans-serif`; ctx.fillText(L.title, lx, y0 + 18 * k);
+    if (L.title) { ctx.fillStyle = '#1c1c1c'; ctx.font = `bold ${Math.round(12 * k)}px system-ui, sans-serif`; ctx.fillText(L.title, lx, y0 + 18 * k); }
     ctx.font = `${Math.round(11.5 * k)}px system-ui, sans-serif`;
     rows.forEach((r, i) => {
-      const cx = lx + Math.floor(i / perCol) * colW, cy = y0 + 36 * k + (i % perCol) * 18 * k;
+      const cx = lx + Math.floor(i / perCol) * colW, cy = y0 + (L.title ? 36 : 34) * k + (i % perCol) * 18 * k;
       ctx.beginPath(); ctx.arc(cx + 5 * k, cy - 4 * k, 5 * k, 0, Math.PI * 2); ctx.fillStyle = r.c; ctx.fill();
       ctx.fillStyle = '#333'; let t = r.t; while (t.length > 4 && ctx.measureText(t).width > colW - 22 * k) t = t.slice(0, -2);
       ctx.fillText(t === r.t ? t : t + '…', cx + 16 * k, cy);
@@ -1250,7 +1251,7 @@ async function exportAnimationGIF() {
   { const cnt = new Map(); allAnimated.forEach((f) => { const c = codeOf((f.properties || {}).use); cnt.set(c, (cnt.get(c) || 0) + 1); });
     const top = [...cnt.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
     GIF_LEGEND = state.oneColor
-      ? { title: `PODs, ${from}\u2013${to}`, items: [{ label: 'All PODs', color: state.oneColor, n: allAnimated.length }], other: 0 }
+      ? { title: '', items: [{ label: 'Location of well/Point of Diversion (POD)', color: state.oneColor, n: null }], other: 0 }
       : { title: `Top uses, ${from}\u2013${to}`, items: top.map(([c, n]) => ({ label: useLabel(c), color: useColor(c), n })),
         other: allAnimated.length - top.reduce((t, [, n]) => t + n, 0) }; }
 
@@ -1317,8 +1318,8 @@ async function exportAnimationGIF() {
     const visible = allAnimated.filter((f) => { const y = yearOf(f); return y !== null && y >= lo && y <= end; })
       .sort((a, b) => (parseSaneDate(a.properties.finish_date)?.getTime() ?? 0) - (parseSaneDate(b.properties.finish_date)?.getTime() ?? 0));   // newer on top
     const span = start === end ? String(start) : `${start}\u2013${end}`;
-    const label = mode === 'window' ? span : (from === end ? String(end) : `${from}\u2013${end}`);
-    drawGifFrame(ctx, W, H, project, visible, label, allAnimated.length);
+    const label = mode === 'window' ? span : String(end);   // cumulative: just the year it runs up to
+    drawGifFrame(ctx, W, H, project, visible, label, mode === 'window' ? allAnimated.length : null);
     const secOf = (id, def, lo, hi) => { const v = parseFloat(document.getElementById(id)?.value); return Math.round(Math.min(hi, Math.max(lo, isFinite(v) ? v : def)) * 1000); };
     gif.addFrame(ctx, { copy: true, delay: i === steps.length - 1 ? Math.max(secOf('gifFrameSec', 0.5, 0.05, 10), secOf('gifLastSec', 1.8, 0, 30)) : secOf('gifFrameSec', 0.5, 0.05, 10) });
   });
