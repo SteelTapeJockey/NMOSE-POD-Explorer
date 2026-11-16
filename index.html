@@ -450,8 +450,9 @@
     <div class="hint">Only PODs completed within the date range above, and inside any drawn/place area, are ever shown. The chart and summary stats on the Stats &amp; Chart tab update once playback stops or pauses, not on every frame, to keep the animation smooth.</div>
 
     <div class="filter-section-title" style="margin-top:18px">Export animation</div>
-    <div class="hint" style="margin-top:2px">Renders every step of the <em>current</em> range/step/mode as a downloadable GIF — the current map view on the selected basemap, with only the PODs the map is showing. The drawn/place area outline is included when one's active.</div>
+    <div class="hint" style="margin-top:2px">Fit to selected area frames the area tightly and draws the basemap at its own scale so labels stay sharp (the size is then close to, not exactly, the width chosen). Renders every step of the <em>current</em> range/step/mode as a downloadable GIF — the current map view on the selected basemap, with only the PODs the map is showing. The drawn/place area outline is included when one's active.</div>
     <div class="row" style="margin-top:8px;gap:8px;flex-wrap:wrap;align-items:center;font-size:12.5px">
+      <label>Frame <select id="gifExtent" style="font-size:12px;padding:2px 4px"><option value="area" selected>Fit to selected area</option><option value="view">Current map view</option></select></label>
       <label>Size <select id="gifSize" style="font-size:12px;padding:2px 4px"><option value="1280" selected>2× (1280 px wide)</option><option value="1920">3× (1920 px wide)</option><option value="640">1× (640 px wide)</option></select></label>
       <label>Seconds per frame <input type="number" id="gifFrameSec" value="0.5" min="0.05" max="10" step="0.05" style="width:64px;font-size:12px;padding:2px 5px"></label>
       <label>Hold last frame (s) <input type="number" id="gifLastSec" value="1.8" min="0" max="30" step="0.1" style="width:64px;font-size:12px;padding:2px 5px"></label>
@@ -1119,7 +1120,7 @@ function makeProjection(bbox, w, h, pad) {
   const offY = pad + (usableH - spanY * scale) / 2;
   return (lon, lat) => [offX + (lon - bbox.minLon) * lonScale * scale, offY + (bbox.maxLat - lat) * scale];
 }
-let GIF_BASEMAP = null, GIF_LEGEND = null;
+let GIF_BASEMAP = null, GIF_LEGEND = null, GIF_TEXT_BOOST = 1;
 function mercXY(lon, lat) {   // Web Mercator at zoom 0 (world = 256 px), same as the map tiles
   const s = Math.sin(Math.max(-85, Math.min(85, lat)) * Math.PI / 180);
   return [(lon + 180) / 360 * 256, (0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)) * 256];
@@ -1138,7 +1139,7 @@ async function renderGifBasemap(project, w, h) {
   const { scale, offX, offY } = project.merc;
   // At 3x (1920 px) the frame is detailed enough to use tiles one zoom level coarser, drawn twice as large:
   // basemap text comes out bigger and town names still show. Smaller sizes keep full-detail tiles.
-  const textBoost = w >= 1920 ? 2 : 1;
+  const textBoost = GIF_TEXT_BOOST;
   const z = Math.max(1, Math.min(def.maxZoom || 16, Math.ceil(Math.log2(scale / textBoost)))), n = 2 ** z, ts = 256 * scale / n;
   const wx0 = -offX / scale, wx1 = (w - offX) / scale, wy0 = -offY / scale, wy1 = (h - offY) / scale;
   const tx0 = Math.floor(wx0 * n / 256), tx1 = Math.floor(wx1 * n / 256), ty0 = Math.max(0, Math.floor(wy0 * n / 256)), ty1 = Math.min(n - 1, Math.floor(wy1 * n / 256));
@@ -1218,11 +1219,24 @@ async function exportAnimationGIF() {
   // export and to build a fixed bounding box so the projection doesn't shift frame to frame.
   // The GIF shows exactly the current map view, and only PODs that pass every filter
   // (status, use, depth, area) - the same set the map shows.
-  const vb = state.map.getBounds();
+  const fitArea = document.getElementById('gifExtent')?.value !== 'view' && !!(state.filterPolygon && state.filterPolygon.bbox);
+  let vb = state.map.getBounds();
+  if (fitArea) {
+    const fb = state.filterPolygon.bbox, padX = (fb.maxLon - fb.minLon) * 0.03, padY = (fb.maxLat - fb.minLat) * 0.03;
+    const ab = L.latLngBounds([fb.minLat - padY, fb.minLon - padX], [fb.maxLat + padY, fb.maxLon + padX]);
+    // PODs are only loaded for what's on screen - the whole area has to be in view for a complete GIF
+    if (!vb.contains(L.latLngBounds([fb.minLat, fb.minLon], [fb.maxLat, fb.maxLon]))) {
+      state.map.fitBounds(ab, { padding: [8, 8] });
+      toast('Zoomed the map out to the whole area so all of its PODs load. Press Export as GIF again once the points have loaded.', 7000);
+      return;
+    }
+    vb = ab;
+  }
   const allAnimated = state.points.filter(f => {
     const props = f.properties || {};
     if (state.statusFilter && !state.statusFilter.has(codeOf(props.status))) return false;
     if (state.useFilter && !state.useFilter.has(codeOf(props.use))) return false;
+    if (!pointInFilter(f)) return false;
     if (window.mxPodDepthOk && !window.mxPodDepthOk(props.depth_well, props.depth_water)) return false;
     const c = f.geometry && f.geometry.coordinates;
     if (!c || !vb.contains([c[1], c[0]])) return false;
@@ -1258,8 +1272,23 @@ async function exportAnimationGIF() {
   }
 
   const bbox = { minLon: vb.getWest(), minLat: vb.getSouth(), maxLon: vb.getEast(), maxLat: vb.getNorth() };
-  const mapEl = state.map.getContainer(), aspect = Math.min(1.25, Math.max(0.45, mapEl.clientHeight / Math.max(1, mapEl.clientWidth)));
-  const W = Math.max(640, Math.min(1920, parseInt(document.getElementById('gifSize')?.value, 10) || 1280)), H = Math.round(W * aspect / 2) * 2;
+  const targetW = Math.max(640, Math.min(1920, parseInt(document.getElementById('gifSize')?.value, 10) || 1280));
+  GIF_TEXT_BOOST = targetW >= 1920 ? 2 : 1;   // 3x: basemap tiles one zoom coarser, drawn twice as large
+  let W, H;
+  if (fitArea) {
+    // Frame the area tightly and pick a size where the basemap is drawn at exactly its own scale
+    // (no shrinking or resampling), so its labels stay crisp and readable. Width lands near the chosen size.
+    const [x0, y1] = mercXY(bbox.minLon, bbox.minLat), [x1, y0] = mercXY(bbox.maxLon, bbox.maxLat);
+    const boost = targetW >= 1920 ? 2 : 1;
+    let z = Math.round(Math.log2(targetW / (x1 - x0) / boost));
+    const dims = (zz) => [Math.round((x1 - x0) * 2 ** zz * boost / 2) * 2, Math.round((y1 - y0) * 2 ** zz * boost / 2) * 2];
+    while (Math.max(...dims(z)) > 2400 && z > 1) z--;
+    while (Math.max(...dims(z)) < 480) z++;
+    [W, H] = dims(z);
+  } else {
+    const mapEl = state.map.getContainer(), aspect = Math.min(1.25, Math.max(0.45, mapEl.clientHeight / Math.max(1, mapEl.clientWidth)));
+    W = targetW; H = Math.round(W * aspect / 2) * 2;
+  }
   const project = makeMercProjection(bbox, W, H, 0);
   statusEl.textContent = 'Loading basemap…';
   GIF_BASEMAP = await renderGifBasemap(project, W, H);
