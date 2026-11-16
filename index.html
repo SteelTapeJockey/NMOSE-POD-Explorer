@@ -425,6 +425,10 @@
       </span>
     </div>
     <div class="hint" style="margin-top:2px">One color draws every POD the same on the map and in the GIF export (the GIF legend then shows a single entry).</div>
+    <div class="row" style="margin-top:10px"><label>Point size</label>
+      <span style="display:flex;gap:8px;align-items:center"><input type="range" id="animPointSize" min="1" max="12" step="0.5" value="4" style="width:150px"><span id="animPointSizeVal" style="font-size:12.5px">4</span></span>
+    </div>
+    <div class="hint" style="margin-top:2px">Size of POD points on the map and in the GIF export. Newer PODs are always drawn on top of older ones.</div>
     <div class="hint" id="animModeHint" style="margin-top:2px"><strong>Cumulative:</strong> shows every POD completed from the start of the range up through the current year — the set only grows. <strong>Single bin only:</strong> shows just the PODs completed within the current step's window (e.g. one 5-year slice) — older PODs disappear again as the window moves forward, so you're always looking at one period at a time rather than the running total.</div>
 
     <div id="animYearDisplay">—</div>
@@ -1174,7 +1178,7 @@ function drawGifFrame(ctx, w, h, project, points, label, totalCount) {
     const [x, y] = project(c[0], c[1]);
     ctx.fillStyle = pointColor(f.properties || {});
     ctx.beginPath();
-    ctx.arc(x, y, 2.8 * k, 0, Math.PI * 2);
+    ctx.arc(x, y, 2.8 * k * ((state.pointSize || 4) / 4), 0, Math.PI * 2);
     ctx.fill();
     if (GIF_BASEMAP) { ctx.strokeStyle = 'rgba(255,255,255,.9)'; ctx.lineWidth = 0.9 * k; ctx.stroke(); }
   }
@@ -1281,7 +1285,8 @@ async function exportAnimationGIF() {
   const yearOf = (f) => { const d = parseSaneDate((f.properties || {}).finish_date); return d ? d.getFullYear() : null; };
   steps.forEach(({ start, end }, i) => {
     const lo = mode === 'window' ? start : from;
-    const visible = allAnimated.filter((f) => { const y = yearOf(f); return y !== null && y >= lo && y <= end; });
+    const visible = allAnimated.filter((f) => { const y = yearOf(f); return y !== null && y >= lo && y <= end; })
+      .sort((a, b) => (parseSaneDate(a.properties.finish_date)?.getTime() ?? 0) - (parseSaneDate(b.properties.finish_date)?.getTime() ?? 0));   // newer on top
     const span = start === end ? String(start) : `${start}\u2013${end}`;
     const label = mode === 'window' ? span : (from === end ? String(end) : `${from}\u2013${end}`);
     drawGifFrame(ctx, W, H, project, visible, label, allAnimated.length);
@@ -1310,7 +1315,7 @@ function markerStyleFor(feature) {
   // visual noise that had nothing to do with the selected area.
   if (state.filterPolygon && !pointInFilter(feature)) return { radius: 0, opacity: 0, fillOpacity: 0 };
   const color = pointColor(feature.properties || {});
-  return { radius: 4, color, weight: 1.5, fillColor: color, fillOpacity: 0.65, opacity: 1 };
+  return { radius: state.pointSize || 4, color, weight: 1.5, fillColor: color, fillOpacity: 0.65, opacity: 1 };
 }
 function buildMarker(feature) {
   const c = feature.geometry && feature.geometry.coordinates;
@@ -1325,8 +1330,9 @@ function rebuildVisibleMarkers() {
   if (!state.markerLayer) return;
   state.markerLayer.clearLayers();
   state.markerIndex = [];
-  for (const feature of state.points) {
-    if (!pointVisible(feature)) continue;
+  const yr = (f) => { if (f._yr === undefined) { const d = parseSaneDate((f.properties || {}).finish_date); f._yr = d ? d.getTime() : -Infinity; } return f._yr; };
+  const vis = state.points.filter(pointVisible).sort((a, b) => yr(a) - yr(b));   // oldest first, so newer PODs sit on top
+  for (const feature of vis) {
     const marker = buildMarker(feature);
     state.markerIndex.push({ feature, marker });
     state.markerLayer.addLayer(marker);
@@ -2383,6 +2389,7 @@ function applyPointColorMode() {
 document.querySelectorAll('.anim-color-btn').forEach(btn => {
   btn.onclick = () => { document.querySelectorAll('.anim-color-btn').forEach(b => b.classList.toggle('active', b === btn)); applyPointColorMode(); };
 });
+document.getElementById('animPointSize').oninput = (e) => { state.pointSize = parseFloat(e.target.value) || 4; document.getElementById('animPointSizeVal').textContent = state.pointSize; applyPolygonStyling(); };
 document.getElementById('animOneColor').oninput = () => { document.querySelectorAll('.anim-color-btn').forEach(b => b.classList.toggle('active', b.dataset.color === 'one')); applyPointColorMode(); };
 document.querySelectorAll('.anim-mode-btn').forEach(btn => {
   btn.onclick = () => {
