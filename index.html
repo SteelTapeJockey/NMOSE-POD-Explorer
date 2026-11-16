@@ -433,6 +433,10 @@
 
     <div class="filter-section-title" style="margin-top:18px">Export animation</div>
     <div class="hint" style="margin-top:2px">Renders every step of the <em>current</em> range/step/mode as a downloadable GIF — drawn on the basemap currently selected on the map (Topographic, Satellite, Streets…). The drawn/place area outline is included when one's active.</div>
+    <div class="row" style="margin-top:8px;gap:8px;flex-wrap:wrap;align-items:center;font-size:12.5px">
+      <label>Seconds per frame <input type="number" id="gifFrameSec" value="0.5" min="0.05" max="10" step="0.05" style="width:64px;font-size:12px;padding:2px 5px"></label>
+      <label>Hold last frame (s) <input type="number" id="gifLastSec" value="1.8" min="0" max="30" step="0.1" style="width:64px;font-size:12px;padding:2px 5px"></label>
+    </div>
     <button id="exportGifBtn" class="small" style="width:100%;margin-top:6px">⬇ Export as GIF</button>
     <div class="hint" id="gifExportStatus" style="margin-top:4px"></div>
     </div>
@@ -1241,7 +1245,8 @@ async function exportAnimationGIF() {
       ? (Math.max(from, cursor - step + 1) === cursor ? String(cursor) : `${Math.max(from, cursor - step + 1)}\u2013${cursor}`)
       : String(cursor);
     drawGifFrame(ctx, W, H, project, visible, label, allAnimated.length);
-    gif.addFrame(ctx, { copy: true, delay: i === steps.length - 1 ? 1800 : 500 });
+    const secOf = (id, def, lo, hi) => { const v = parseFloat(document.getElementById(id)?.value); return Math.round(Math.min(hi, Math.max(lo, isFinite(v) ? v : def)) * 1000); };
+    gif.addFrame(ctx, { copy: true, delay: i === steps.length - 1 ? Math.max(secOf('gifFrameSec', 0.5, 0.05, 10), secOf('gifLastSec', 1.8, 0, 30)) : secOf('gifFrameSec', 0.5, 0.05, 10) });
   });
 
   gif.on('progress', (p) => { statusEl.textContent = `Encoding GIF… ${Math.round(p * 100)}%`; });
