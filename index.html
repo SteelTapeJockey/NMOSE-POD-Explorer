@@ -453,7 +453,6 @@
     <div class="hint" style="margin-top:2px">Renders every step of the <em>current</em> range/step/mode as a downloadable GIF — the current map view on the selected basemap, with only the PODs the map is showing. The drawn/place area outline is included when one's active.</div>
     <div class="row" style="margin-top:8px;gap:8px;flex-wrap:wrap;align-items:center;font-size:12.5px">
       <label>Size <select id="gifSize" style="font-size:12px;padding:2px 4px"><option value="1280" selected>2× (1280 px wide)</option><option value="1920">3× (1920 px wide)</option><option value="640">1× (640 px wide)</option></select></label>
-      <label>Basemap text <select id="gifLabelSize" style="font-size:12px;padding:2px 4px"><option value="2" selected>Larger</option><option value="1">Standard</option></select></label>
       <label>Seconds per frame <input type="number" id="gifFrameSec" value="0.5" min="0.05" max="10" step="0.05" style="width:64px;font-size:12px;padding:2px 5px"></label>
       <label>Hold last frame (s) <input type="number" id="gifLastSec" value="1.8" min="0" max="30" step="0.1" style="width:64px;font-size:12px;padding:2px 5px"></label>
     </div>
@@ -1137,8 +1136,7 @@ function makeMercProjection(bbox, w, h, pad) {
 async function renderGifBasemap(project, w, h) {
   const key = document.getElementById('basemapSelect')?.value, def = BASEMAPS[key] || BASEMAPS.topo;
   const { scale, offX, offY } = project.merc;
-  // tiles one zoom level coarser than the frame needs, drawn at 1-2x their native size: basemap labels are never shrunk and come out larger
-  const z = Math.max(1, Math.min(def.maxZoom || 16, Math.ceil(Math.log2(scale / (parseFloat(document.getElementById('gifLabelSize')?.value) || 2))))), n = 2 ** z, ts = 256 * scale / n;
+  const z = Math.max(1, Math.min(def.maxZoom || 16, Math.ceil(Math.log2(scale)))), n = 2 ** z, ts = 256 * scale / n;
   const wx0 = -offX / scale, wx1 = (w - offX) / scale, wy0 = -offY / scale, wy1 = (h - offY) / scale;
   const tx0 = Math.floor(wx0 * n / 256), tx1 = Math.floor(wx1 * n / 256), ty0 = Math.max(0, Math.floor(wy0 * n / 256)), ty1 = Math.min(n - 1, Math.floor(wy1 * n / 256));
   const c = document.createElement('canvas'); c.width = w; c.height = h;
@@ -1153,62 +1151,57 @@ async function renderGifBasemap(project, w, h) {
   const ok = (await Promise.all(jobs)).filter(Boolean).length;
   if (!ok) { toast('Could not load the basemap for the GIF — exporting on a plain background.'); return null; }
   try { g.getImageData(0, 0, 1, 1); } catch (e) { return null; }   // tiles not shareable - fall back
-  const kk = w / 640; g.font = `${Math.round(10 * kk)}px system-ui, sans-serif`; const aw = g.measureText('Basemap: Esri').width + 10 * kk;
-  g.fillStyle = 'rgba(255,255,255,.8)'; g.fillRect(w - aw, h - 16 * kk, aw, 16 * kk); g.fillStyle = '#333'; g.fillText('Basemap: Esri', w - aw + 5 * kk, h - 5 * kk);
   return c;
+}
+// Height of the white band under the map that holds the period, counts, legend and credits (nothing covers the map).
+function gifBandHeight(w) {
+  const k = w / 640, n = GIF_LEGEND ? GIF_LEGEND.items.length + (GIF_LEGEND.other ? 1 : 0) : 0, perCol = n;   // legend in one column
+  return Math.round(Math.max(64, 26 + perCol * 18 + 8) * k + 16 * k);
 }
 function drawGifFrame(ctx, w, h, project, points, label, totalCount) {
   const k = w / 640;   // everything (dots, outline, text) scales with the export size
+  // ---- map area (0..h): basemap, area outline, points
+  ctx.save(); ctx.beginPath(); ctx.rect(0, 0, w, h); ctx.clip();
   if (GIF_BASEMAP) ctx.drawImage(GIF_BASEMAP, 0, 0);
   else { ctx.fillStyle = '#f7f5f0'; ctx.fillRect(0, 0, w, h); }
   if (state.filterPolygon) {
-    ctx.strokeStyle = '#ff6600';
-    ctx.lineWidth = 2 * k;
-    ctx.setLineDash([6 * k, 4 * k]);
-    for (const rings of state.filterPolygon.polys) {
-      for (const ring of rings) {
-        ctx.beginPath();
-        ring.forEach(([lon, lat], i) => { const [x, y] = project(lon, lat); if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y); });
-        ctx.stroke();
-      }
+    ctx.strokeStyle = '#ff6600'; ctx.lineWidth = 2 * k; ctx.setLineDash([6 * k, 4 * k]);
+    for (const rings of state.filterPolygon.polys) for (const ring of rings) {
+      ctx.beginPath(); ring.forEach(([lon, lat], i) => { const [x, y] = project(lon, lat); if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y); }); ctx.stroke();
     }
     ctx.setLineDash([]);
   }
   for (const f of points) {
-    const c = f.geometry && f.geometry.coordinates;
-    if (!c) continue;
+    const c = f.geometry && f.geometry.coordinates; if (!c) continue;
     const [x, y] = project(c[0], c[1]);
     ctx.fillStyle = pointColor(f.properties || {});
-    ctx.beginPath();
-    ctx.arc(x, y, 2.8 * k * ((state.pointSize || 4) / 4), 0, Math.PI * 2);
-    ctx.fill();
+    ctx.beginPath(); ctx.arc(x, y, 2.8 * k * ((state.pointSize || 4) / 4), 0, Math.PI * 2); ctx.fill();
     if (GIF_BASEMAP) { ctx.strokeStyle = 'rgba(255,255,255,.9)'; ctx.lineWidth = 0.9 * k; ctx.stroke(); }
   }
-  if (GIF_BASEMAP) { ctx.fillStyle = 'rgba(255,255,255,.85)'; ctx.fillRect(8 * k, 8 * k, Math.max(90, label.length * 13 + 20) * k, 34 * k); ctx.fillRect(8 * k, h - 30 * k, w - 110 * k, 22 * k); }
-  if (GIF_LEGEND && GIF_LEGEND.items.length) {   // top uses for the exported period, bottom left
-    const L = GIF_LEGEND, rowH = 20 * k, pad = 10 * k, titleH = 20 * k;
-    ctx.font = `${Math.round(12 * k)}px system-ui, sans-serif`;
-    const rows = L.items.map((it) => `${it.label}  (${it.n.toLocaleString()})`);
-    if (L.other) rows.push(`Other uses  (${L.other.toLocaleString()})`);
-    ctx.font = `bold ${Math.round(12 * k)}px system-ui, sans-serif`; let tw = ctx.measureText(L.title).width;
-    ctx.font = `${Math.round(12 * k)}px system-ui, sans-serif`; rows.forEach((r) => { tw = Math.max(tw, ctx.measureText(r).width + 20 * k); });
-    const bw = tw + pad * 2, bh = titleH + rows.length * rowH + pad, bx = 8 * k, by = h - 38 * k - bh;
-    ctx.fillStyle = 'rgba(255,255,255,.9)'; ctx.fillRect(bx, by, bw, bh);
-    ctx.fillStyle = '#1c1c1c'; ctx.font = `bold ${Math.round(12 * k)}px system-ui, sans-serif`; ctx.fillText(L.title, bx + pad, by + 16 * k);
-    ctx.font = `${Math.round(12 * k)}px system-ui, sans-serif`;
-    rows.forEach((r, n) => {
-      const cy = by + titleH + n * rowH + rowH / 2 + 2 * k, it = L.items[n];
-      ctx.beginPath(); ctx.arc(bx + pad + 5 * k, cy - 4 * k, 5 * k, 0, Math.PI * 2);
-      ctx.fillStyle = it ? it.color : '#b0b0b0'; ctx.fill(); ctx.strokeStyle = 'rgba(255,255,255,.9)'; ctx.lineWidth = 1 * k; ctx.stroke();
-      ctx.fillStyle = '#333'; ctx.fillText(r, bx + pad + 16 * k, cy);
+  ctx.restore();
+  // ---- band under the map: period + counts (left), legend (right), credits (bottom)
+  const bh = gifBandHeight(w), y0 = h;
+  ctx.fillStyle = '#ffffff'; ctx.fillRect(0, y0, w, bh);
+  ctx.fillStyle = '#d9d9d9'; ctx.fillRect(0, y0, w, Math.max(1, k));
+  ctx.fillStyle = '#1c1c1c'; ctx.font = `bold ${Math.round(26 * k)}px system-ui, sans-serif`; ctx.fillText(label, 14 * k, y0 + 34 * k);
+  ctx.fillStyle = '#555'; ctx.font = `${Math.round(12 * k)}px system-ui, sans-serif`;
+  ctx.fillText(`${points.length.toLocaleString()} of ${totalCount.toLocaleString()} PODs shown`, 14 * k, y0 + 54 * k);
+  if (GIF_LEGEND && GIF_LEGEND.items.length) {
+    const L = GIF_LEGEND, rows = L.items.map((it) => ({ t: `${it.label}  (${it.n.toLocaleString()})`, c: it.color }));
+    if (L.other) rows.push({ t: `Other uses  (${L.other.toLocaleString()})`, c: '#b0b0b0' });
+    const perCol = rows.length, lx = w * 0.36, colW = w - lx - 10 * k;
+    ctx.fillStyle = '#1c1c1c'; ctx.font = `bold ${Math.round(12 * k)}px system-ui, sans-serif`; ctx.fillText(L.title, lx, y0 + 18 * k);
+    ctx.font = `${Math.round(11.5 * k)}px system-ui, sans-serif`;
+    rows.forEach((r, i) => {
+      const cx = lx + Math.floor(i / perCol) * colW, cy = y0 + 36 * k + (i % perCol) * 18 * k;
+      ctx.beginPath(); ctx.arc(cx + 5 * k, cy - 4 * k, 5 * k, 0, Math.PI * 2); ctx.fillStyle = r.c; ctx.fill();
+      ctx.fillStyle = '#333'; let t = r.t; while (t.length > 4 && ctx.measureText(t).width > colW - 22 * k) t = t.slice(0, -2);
+      ctx.fillText(t === r.t ? t : t + '…', cx + 16 * k, cy);
     });
   }
-  ctx.fillStyle = '#1c1c1c';
-  ctx.font = `bold ${Math.round(22 * k)}px system-ui, sans-serif`;
-  ctx.fillText(label, 16 * k, 32 * k);
-  ctx.fillStyle = '#666';
-  ctx.font = `${Math.round(12 * k)}px system-ui, sans-serif`;
-  ctx.fillText(`${points.length.toLocaleString()} of ${totalCount.toLocaleString()} PODs shown — Water Use vs. Aquifer Conditions Explorer`, 16 * k, h - 14 * k);
+  ctx.fillStyle = '#888'; ctx.font = `${Math.round(10 * k)}px system-ui, sans-serif`;
+  const credit = `Water Use vs. Aquifer Conditions Explorer${GIF_BASEMAP ? ' · Basemap: Esri' : ''}`;
+  ctx.fillText(credit, w - ctx.measureText(credit).width - 10 * k, y0 + bh - 6 * k);
 }
 async function exportAnimationGIF() {
   const statusEl = document.getElementById('gifExportStatus');
@@ -1268,7 +1261,8 @@ async function exportAnimationGIF() {
   statusEl.textContent = 'Loading basemap…';
   GIF_BASEMAP = await renderGifBasemap(project, W, H);
   const canvas = document.createElement('canvas');
-  canvas.width = W; canvas.height = H;
+  const HB = H + gifBandHeight(W);   // map + band underneath
+  canvas.width = W; canvas.height = HB;
   const ctx = canvas.getContext('2d');
 
   statusEl.textContent = `Rendering frame 1 of ${steps.length}…`;
@@ -1282,7 +1276,7 @@ async function exportAnimationGIF() {
     toast('Could not load the GIF encoder\u2019s worker script — check your connection and try again.');
     return;
   }
-  const gif = new GIF({ workers: Math.min(4, navigator.hardwareConcurrency || 2), quality: 10, width: W, height: H, workerScript: workerScriptUrl });
+  const gif = new GIF({ workers: Math.min(4, navigator.hardwareConcurrency || 2), quality: 10, width: W, height: HB, workerScript: workerScriptUrl });
 
   const yearOf = (f) => { const d = parseSaneDate((f.properties || {}).finish_date); return d ? d.getFullYear() : null; };
   steps.forEach(({ start, end }, i) => {
