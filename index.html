@@ -66,6 +66,7 @@
   .panel-tab { display: none; }
   .panel-tab.active { display: block; }
   .anim-step-btn.active { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+  .anim-color-btn.active { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
   .anim-mode-btn.active { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
   #animYearDisplay { font-size: 34px; font-weight: 800; text-align: center; margin: 14px 0 8px; font-variant-numeric: tabular-nums; }
   #animProgressTrack { height: 8px; background: var(--grid); border-radius: 4px; position: relative; overflow: hidden; }
@@ -416,6 +417,14 @@
         <button type="button" class="small anim-mode-btn" data-mode="window">Single bin only</button>
       </span>
     </div>
+    <div class="row" style="margin-top:10px"><label>Point color</label>
+      <span style="display:flex;gap:6px;align-items:center">
+        <button type="button" class="small anim-color-btn active" data-color="use">By use</button>
+        <button type="button" class="small anim-color-btn" data-color="one">One color</button>
+        <input type="color" id="animOneColor" value="#d7263d" title="Color for all PODs" style="width:34px;height:26px;padding:0;border:1px solid var(--border);border-radius:4px;background:none">
+      </span>
+    </div>
+    <div class="hint" style="margin-top:2px">One color draws every POD the same on the map and in the GIF export (the GIF legend then shows a single entry).</div>
     <div class="hint" id="animModeHint" style="margin-top:2px"><strong>Cumulative:</strong> shows every POD completed from the start of the range up through the current year — the set only grows. <strong>Single bin only:</strong> shows just the PODs completed within the current step's window (e.g. one 5-year slice) — older PODs disappear again as the window moves forward, so you're always looking at one period at a time rather than the running total.</div>
 
     <div id="animYearDisplay">—</div>
@@ -808,7 +817,7 @@ function pointVisible(feature) {
   }
   return true;
 }
-function pointColor(props) { return useColor(codeOf(props.use)); }
+function pointColor(props) { return state.oneColor || useColor(codeOf(props.use)); }   // state.oneColor: Animation tab "One color"
 
 // The list of possible statuses comes from the static CODE_TABLES.status (the service's own
 // field domain is always null, so it can't supply this) — not from currently-loaded data, so
@@ -1222,8 +1231,10 @@ async function exportAnimationGIF() {
   if (!allAnimated.length) { toast('No PODs in the current map view match the filters within this date range.'); return; }
   { const cnt = new Map(); allAnimated.forEach((f) => { const c = codeOf((f.properties || {}).use); cnt.set(c, (cnt.get(c) || 0) + 1); });
     const top = [...cnt.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
-    GIF_LEGEND = { title: `Top uses, ${from}\u2013${to}`, items: top.map(([c, n]) => ({ label: useLabel(c), color: useColor(c), n })),
-      other: allAnimated.length - top.reduce((t, [, n]) => t + n, 0) }; }
+    GIF_LEGEND = state.oneColor
+      ? { title: `PODs, ${from}\u2013${to}`, items: [{ label: 'All PODs', color: state.oneColor, n: allAnimated.length }], other: 0 }
+      : { title: `Top uses, ${from}\u2013${to}`, items: top.map(([c, n]) => ({ label: useLabel(c), color: useColor(c), n })),
+        other: allAnimated.length - top.reduce((t, [, n]) => t + n, 0) }; }
 
   // One frame per period with no gaps or overlaps: from..from+step-1, from+step..from+2*step-1, ... ending at `to`.
   // (Before, the first frame already ended at from+step and only the end year was labelled, so periods looked skipped.)
@@ -2364,6 +2375,15 @@ document.querySelectorAll('.anim-step-btn').forEach(btn => {
     if (state.anim.mode === 'window' && state.anim.cursor != null) { rebuildVisibleMarkers(); updateStats(); } // step size changes the visible bin immediately in window mode
   };
 });
+function applyPointColorMode() {
+  const one = document.querySelector('.anim-color-btn.active')?.dataset.color === 'one';
+  state.oneColor = one ? (document.getElementById('animOneColor').value || '#d7263d') : null;
+  applyPolygonStyling();
+}
+document.querySelectorAll('.anim-color-btn').forEach(btn => {
+  btn.onclick = () => { document.querySelectorAll('.anim-color-btn').forEach(b => b.classList.toggle('active', b === btn)); applyPointColorMode(); };
+});
+document.getElementById('animOneColor').oninput = () => { document.querySelectorAll('.anim-color-btn').forEach(b => b.classList.toggle('active', b.dataset.color === 'one')); applyPointColorMode(); };
 document.querySelectorAll('.anim-mode-btn').forEach(btn => {
   btn.onclick = () => {
     state.anim.mode = btn.dataset.mode;
