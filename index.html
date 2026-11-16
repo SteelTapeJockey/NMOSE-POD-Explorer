@@ -453,6 +453,7 @@
     <div class="hint" style="margin-top:2px">Renders every step of the <em>current</em> range/step/mode as a downloadable GIF — the current map view on the selected basemap, with only the PODs the map is showing. The drawn/place area outline is included when one's active.</div>
     <div class="row" style="margin-top:8px;gap:8px;flex-wrap:wrap;align-items:center;font-size:12.5px">
       <label>Size <select id="gifSize" style="font-size:12px;padding:2px 4px"><option value="1280" selected>2× (1280 px wide)</option><option value="1920">3× (1920 px wide)</option><option value="640">1× (640 px wide)</option></select></label>
+      <label>Basemap text <select id="gifLabelSize" style="font-size:12px;padding:2px 4px"><option value="2" selected>Larger</option><option value="1">Standard</option></select></label>
       <label>Seconds per frame <input type="number" id="gifFrameSec" value="0.5" min="0.05" max="10" step="0.05" style="width:64px;font-size:12px;padding:2px 5px"></label>
       <label>Hold last frame (s) <input type="number" id="gifLastSec" value="1.8" min="0" max="30" step="0.1" style="width:64px;font-size:12px;padding:2px 5px"></label>
     </div>
@@ -1136,7 +1137,8 @@ function makeMercProjection(bbox, w, h, pad) {
 async function renderGifBasemap(project, w, h) {
   const key = document.getElementById('basemapSelect')?.value, def = BASEMAPS[key] || BASEMAPS.topo;
   const { scale, offX, offY } = project.merc;
-  const z = Math.max(1, Math.min(def.maxZoom || 16, Math.ceil(Math.log2(scale)))), n = 2 ** z, ts = 256 * scale / n;
+  // tiles one zoom level coarser than the frame needs, drawn at 1-2x their native size: basemap labels are never shrunk and come out larger
+  const z = Math.max(1, Math.min(def.maxZoom || 16, Math.ceil(Math.log2(scale / (parseFloat(document.getElementById('gifLabelSize')?.value) || 2))))), n = 2 ** z, ts = 256 * scale / n;
   const wx0 = -offX / scale, wx1 = (w - offX) / scale, wy0 = -offY / scale, wy1 = (h - offY) / scale;
   const tx0 = Math.floor(wx0 * n / 256), tx1 = Math.floor(wx1 * n / 256), ty0 = Math.max(0, Math.floor(wy0 * n / 256)), ty1 = Math.min(n - 1, Math.floor(wy1 * n / 256));
   const c = document.createElement('canvas'); c.width = w; c.height = h;
