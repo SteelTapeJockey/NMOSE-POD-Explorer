@@ -1136,7 +1136,10 @@ function makeMercProjection(bbox, w, h, pad) {
 async function renderGifBasemap(project, w, h) {
   const key = document.getElementById('basemapSelect')?.value, def = BASEMAPS[key] || BASEMAPS.topo;
   const { scale, offX, offY } = project.merc;
-  const z = Math.max(1, Math.min(def.maxZoom || 16, Math.ceil(Math.log2(scale)))), n = 2 ** z, ts = 256 * scale / n;
+  // At 3x (1920 px) the frame is detailed enough to use tiles one zoom level coarser, drawn twice as large:
+  // basemap text comes out bigger and town names still show. Smaller sizes keep full-detail tiles.
+  const textBoost = w >= 1920 ? 2 : 1;
+  const z = Math.max(1, Math.min(def.maxZoom || 16, Math.ceil(Math.log2(scale / textBoost)))), n = 2 ** z, ts = 256 * scale / n;
   const wx0 = -offX / scale, wx1 = (w - offX) / scale, wy0 = -offY / scale, wy1 = (h - offY) / scale;
   const tx0 = Math.floor(wx0 * n / 256), tx1 = Math.floor(wx1 * n / 256), ty0 = Math.max(0, Math.floor(wy0 * n / 256)), ty1 = Math.min(n - 1, Math.floor(wy1 * n / 256));
   const c = document.createElement('canvas'); c.width = w; c.height = h;
