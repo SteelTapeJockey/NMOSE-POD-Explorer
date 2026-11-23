@@ -173,6 +173,7 @@
   .mx-tbl .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .mx-tbl thead th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .02em; border-bottom: 2px solid var(--border); position: sticky; top: 0; background: var(--surface-1); cursor: pointer; white-space: nowrap; }
   .mx-tbl tbody tr:hover { background: var(--wash); } .mx-tbl tr.clickable { cursor: pointer; } .mx-tbl tr.flagged { background: #fff6d6; }
+  .wu-cmp thead th { white-space: normal; } .wu-cmp td:first-child { min-width: 110px; }
   .mx-tbl tr.sel { outline: 2px solid var(--accent); outline-offset: -2px; }
   .mx-expl { color: var(--ink-2); font-size: 12px; line-height: 1.4; }
   .mx-pill { display: inline-block; padding: 1px 7px; border-radius: 999px; background: var(--wash); border: 1px solid var(--grid); font-size: 11px; margin: 0 4px 3px 0; }
@@ -339,6 +340,7 @@
       <button type="button" class="tab" data-tab="mxpod">Meter readings</button>
       <button type="button" class="tab" data-tab="mxgw">Pumping vs. GW levels</button>
       <button type="button" class="tab" data-tab="mxwell">Well schematic</button>
+      <button type="button" class="tab" data-tab="mxstate">Statewide stats</button>
     </div>
     <div class="panel-content">
     <div class="panel-tab active" data-panel="stats">
@@ -465,6 +467,7 @@
     <div class="panel-tab" data-panel="mxpod" id="mx-pod"></div>
     <div class="panel-tab" data-panel="mxgw" id="mx-gw"></div>
     <div class="panel-tab" data-panel="mxwell" id="mx-well"></div>
+    <div class="panel-tab" data-panel="mxstate" id="mx-state"></div>
     </div>
   </div>
 </div>
@@ -3704,6 +3707,160 @@ function part2Banner() { return PART2_PROBLEM ? `<div class="mx-callout" style="
 })();
 $('mxWlMinYears').onchange = (e) => { S.wlMinYears = Math.max(1, Math.round(+e.target.value) || 1); e.target.value = S.wlMinYears; drawWellLayer(); syncLayers(); if (S.area) { if (activeTab() === 'mxgw') renderArea(); else S.dirtyGw = true; } };
 $('mxOpenAnoms').onclick = (e) => { e.preventDefault(); showTab('mxanoms'); };
+// ============================== Statewide stats tab ==============================
+// Metered pumping (NMWRRS, from DASH_DATA.pods[].pu = [year, as reported, excluding flagged reads]) summarised
+// statewide / by county / by OSE basin, by use, and compared with NMOSE's 2020 Water Use by Categories report.
+const OSE2020 = {"cty":{"BE":[[33250,0,39564,38,0,0,0,0,0],[68586,1738,2722,71,6317,2610,339,302,0]],"CA":[[0,0,16813,248,2349,0,0,0,0],[145,172,642,106,20,0,0,0,0]],"CH":[[0,0,31446,224,2219,0,0,0,0],[17160,817,209688,7145,674,0,24,0,0]],"CI":[[0,0,2517,22,0,0,0,0,1463],[2585,1079,476,97,116,393,250,0,0]],"CO":[[1287,0,53926,336,2,0,0,0,10488],[769,102,1719,353,130,0,6,0,0]],"CU":[[0,0,0,270,0,0,0,0,0],[4894,173,188286,6936,1034,0,0,0,0]],"DB":[[0,0,42542,61,0,0,0,0,7727],[630,23,10343,249,91,0,12,0,0]],"DA":[[0,0,191447,135,0,0,0,0,0],[36690,1207,218660,2967,6597,289,151,1846,0]],"ED":[[0,0,69614,49,0,0,0,0,21131],[16596,423,115028,1602,802,2292,21044,0,0]],"GR":[[0,0,28878,137,0,0,0,0,0],[2978,289,4540,156,115,0,15612,0,0]],"GU":[[40,0,20649,61,5212,0,0,0,7011],[637,46,0,245,378,0,6,0,0]],"HA":[[0,0,0,69,0,0,0,0,0],[70,20,5503,282,0,0,0,0,0]],"HI":[[0,0,9785,60,0,0,0,0,0],[5163,100,67287,251,224,11,1,60,0]],"LE":[[0,0,0,141,0,0,0,0,0],[10015,1857,216704,2861,3344,109,17118,28255,0]],"LI":[[887,0,9739,169,0,0,0,0,0],[2556,95,3964,189,1334,48,0,0,0]],"LA":[[4,0,0,0,0,0,0,0,0],[3913,0,0,0,0,0,0,0,0]],"LU":[[0,0,868,43,0,0,0,0,0],[4828,961,99097,970,540,0,223,255,0]],"MK":[[0,0,96,16,0,0,0,0,0],[3060,3621,122,68,135,3,117,2227,0]],"MO":[[0,0,30902,142,461,0,0,0,0],[333,67,0,172,9,0,6,0,0]],"OT":[[3852,0,15175,93,197,0,360,0,0],[5702,1000,9304,117,1043,69,262,0,0]],"QU":[[0,0,64349,46,0,0,0,0,32527],[1622,51,27934,427,55,0,12,0,0]],"RA":[[198,0,114666,158,3339,0,5,0,25890],[1360,1791,1329,183,102,0,25,0,0]],"RO":[[0,0,0,113,0,0,0,0,0],[2903,115,122036,4941,126,0,6,0,0]],"SA":[[69,0,49737,40,585,0,0,0,5557],[13621,3452,750,54,2082,2760,582,0,0]],"SJ":[[21357,0,330370,23,913,0,2,32474,27174],[54,1074,0,112,0,0,62,0,0]],"SM":[[2142,0,36028,14,646,0,0,0,31162],[444,573,0,15,395,0,18,0,0]],"SF":[[7185,0,5914,40,392,0,0,0,0],[6989,3093,17088,60,1066,0,22,0,0]],"SI":[[0,0,9058,44,0,0,0,0,109335],[1893,125,11177,339,1056,0,14,0,0]],"SO":[[1,0,90072,6,0,0,0,0,2357],[2338,268,28789,918,1220,0,41,0,0]],"TA":[[62,0,65380,35,9772,0,0,0,442],[2495,1446,3917,51,606,0,95,0,0]],"TO":[[0,0,0,37,0,0,0,0,0],[1171,550,32981,414,200,0,84,0,0]],"UN":[[0,0,0,255,0,0,0,0,258],[724,98,90171,2298,116,0,13,0,0]],"VA":[[0,0,137904,19,13,0,0,0,0],[6549,3724,8997,718,598,2,239,2,0]]},"state":[[70333,0,1467442,3147,26101,0,367,32474,282522],[229470,30151,1499256,35371,30526,8586,56385,32946,0]],"meas":[[95,0,62,0,100,0,1,100,76],[98,0,35,4,95,100,63,100,0]]};   // NMOSE Tech. Rpt. 56, App. B Tables 2, 4, 5: [surface, ground] AF (or % measured) in category order
+const WU_CATS = [
+  { k: 'PWS', lbl: 'Public water supply', c: '#2a78d6', codes: 'MUN MDW SUB MOB MIL UTL' },
+  { k: 'DOM', lbl: 'Domestic (self-supplied)', c: '#e34948', codes: 'DOM MUL DOL PDM PDL PMH' },
+  { k: 'IRR', lbl: 'Irrigated agriculture', c: '#1baf7a', codes: 'IRR AGR' },
+  { k: 'STK', lbl: 'Livestock (incl. dairies)', c: '#9c6b30', codes: 'STK PLS DAI FPO POU LWD' },
+  { k: 'COM', lbl: 'Commercial', c: '#eda100', codes: 'COM SCH REC SAN NON CEM FGP' },
+  { k: 'IND', lbl: 'Industrial', c: '#4a3aa7', codes: 'IND MFG MPP PPP CON HWY PUB DCN' },
+  { k: 'MIN', lbl: 'Mining & oil/gas', c: '#5b6770', codes: 'MIN OIL PRO SRO OFM BPW EXP DEW INJ' },
+  { k: 'PWR', lbl: 'Power', c: '#e87ba4', codes: 'GEO' },
+  { k: 'EVP', lbl: 'Reservoir evaporation', c: '#7fc4e8', codes: '' },
+  { k: 'OTH', lbl: 'Other / unclassified', c: '#b9c1bb', codes: '' },
+];
+const WU_OF = {}; WU_CATS.forEach((c) => c.codes.split(' ').filter(Boolean).forEach((u) => { WU_OF[u] = c.k; }));
+const WU_SURFACE = new Set(['SP', 'SD']);   // surface-water file prefixes; everything else is a well
+const fmt0 = (x) => x == null || !isFinite(x) ? '—' : Math.round(x).toLocaleString(), af0 = (x) => `<span class="${x < 0 ? 'mx-neg' : ''}">${fmt0(x)}</span>`;
+const wuCode = (u) => String(u || '').split(/[,\s]+/).filter(Boolean)[0] || '';
+const wuCat = (u) => WU_OF[wuCode(u)] || 'OTH';
+let WU = null;   // flattened [year, reported, clean, catIdx, useCode, county, basin, surface] rows
+const ST = { year: null, by: 'state', region: '', basis: 2, group: 'cat' };
+function wuRows() {
+  if (WU) return WU;
+  const ci = Object.fromEntries(WU_CATS.map((c, i) => [c.k, i]));
+  WU = [];
+  for (const p of D.pods) {
+    if (!p.pu || !p.pu.length) continue;
+    const cat = ci[wuCat(p.use)], code = wuCode(p.use) || '(none)', cty = p.cty || 'XX', b = p.b || '?', sf = WU_SURFACE.has(p.b);
+    for (const [y, rep, cln] of p.pu) WU.push([y, rep || 0, cln || 0, cat, code, cty, b, sf, p.id]);
+  }
+  return WU;
+}
+const wuRegionName = (by, k) => by === 'county' ? (CODE_TABLES.county[k] || k) : by === 'basin' ? (CODE_TABLES.pod_basin[k] || k) : 'New Mexico';
+const wuInRegion = (r) => ST.by === 'state' || !ST.region || (ST.by === 'county' ? r[5] === ST.region : r[6] === ST.region);
+function buildStateTab() {
+  const rows = wuRows(), thisYear = new Date().getFullYear();
+  const years = [...new Set(rows.map((r) => r[0]))].sort((a, b) => a - b);
+  if (ST.year == null) ST.year = years.includes(2020) ? 2020 : years.filter((y) => y < thisYear).slice(-1)[0];
+  const regions = ST.by === 'state' ? [] : [...new Set(rows.map((r) => ST.by === 'county' ? r[5] : r[6]))]
+    .sort((a, b) => wuRegionName(ST.by, a).localeCompare(wuRegionName(ST.by, b)));
+  if (ST.region && !regions.includes(ST.region)) ST.region = '';
+  const opt = (v, t, sel) => `<option value="${esc(String(v))}"${sel ? ' selected' : ''}>${esc(t)}</option>`;
+  const v = ST.basis, sel = rows.filter((r) => r[0] === ST.year && wuInRegion(r));
+  // ---- by use for the selected year/region
+  const grp = new Map();
+  for (const r of sel) {
+    const k = ST.group === 'cat' ? r[3] : r[4];
+    const g = grp.get(k) || { af: 0, gw: 0, sw: 0, pods: new Set() };
+    g.af += r[v]; g[r[7] ? 'sw' : 'gw'] += r[v]; if (r[v] > 0) g.pods.add(r[8]); grp.set(k, g);
+  }
+  const tot = [...grp.values()].reduce((a, g) => a + g.af, 0), gwTot = [...grp.values()].reduce((a, g) => a + g.gw, 0);
+  const podsRep = new Set(sel.filter((r) => r[v] > 0).map((r) => r[8])).size;
+  const useRows = [...grp.entries()].sort((a, b) => b[1].af - a[1].af);
+  const lblOf = (k) => ST.group === 'cat' ? WU_CATS[k].lbl : `${CODE_TABLES.use[k] || k} (${k})`;
+  const colOf = (k) => ST.group === 'cat' ? WU_CATS[k].c : WU_CATS[WU_CATS.findIndex((c) => c.k === (WU_OF[k] || 'OTH'))].c;
+  const rname = ST.by === 'state' || !ST.region ? (ST.by === 'state' ? 'Statewide' : `All ${ST.by === 'county' ? 'counties' : 'OSE basins'}`) : wuRegionName(ST.by, ST.region);
+  const partial = ST.year >= thisYear ? ' <span class="muted">(year in progress)</span>' : '';
+  // ---- regional table (selected year)
+  let regTbl = '';
+  if (ST.by !== 'state') {
+    const reg = new Map();
+    for (const r of rows) {
+      if (r[0] !== ST.year) continue;
+      const k = ST.by === 'county' ? r[5] : r[6], g = reg.get(k) || { af: 0, c: new Array(WU_CATS.length).fill(0), pods: new Set() };
+      g.af += r[v]; g.c[r[3]] += r[v]; if (r[v] > 0) g.pods.add(r[8]); reg.set(k, g);
+    }
+    const shown = WU_CATS.map((c, i) => i).filter((i) => WU_CATS[i].k !== 'EVP' && WU_CATS[i].k !== 'PWR');
+    regTbl = `<h3>${ST.by === 'county' ? 'Counties' : 'OSE basins'}, ${ST.year} <span class="muted" style="font-weight:400">— click a row to focus on it</span></h3>
+      <div class="mx-scroll" style="max-height:330px"><table class="mx-tbl"><thead><tr><th>${ST.by === 'county' ? 'County' : 'Basin'}</th><th class="num">Total AF</th><th class="num">PODs</th>
+      ${shown.map((i) => `<th class="num" title="${esc(WU_CATS[i].lbl)}">${WU_CATS[i].k}</th>`).join('')}</tr></thead><tbody>
+      ${[...reg.entries()].sort((a, b) => b[1].af - a[1].af).map(([k, g]) => `<tr class="clickable${k === ST.region ? ' sel' : ''}" data-wureg="${esc(k)}"><td>${esc(wuRegionName(ST.by, k))}</td><td class="num"><b>${af0(g.af)}</b></td><td class="num">${g.pods.size.toLocaleString()}</td>
+        ${shown.map((i) => `<td class="num">${g.c[i] ? af0(g.c[i]) : '<span class="muted">—</span>'}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+  }
+  // ---- comparison with the OSE 2020 report (2020 metered pumping, same basis)
+  const cmpCty = ST.by === 'county' && ST.region && OSE2020.cty[ST.region] ? ST.region : null;
+  const ose = cmpCty ? OSE2020.cty[cmpCty] : OSE2020.state;
+  const r20 = rows.filter((r) => r[0] === 2020 && (!cmpCty || r[5] === cmpCty));
+  const m = WU_CATS.map(() => [0, 0]); r20.forEach((r) => { m[r[3]][r[7] ? 0 : 1] += r[v]; });
+  const pctOf = (a, b) => b > 0 ? Math.round(100 * a / b) + '%' : (a > 0 ? 'n/a' : '—');
+  const cmpRows = WU_CATS.map((c, i) => ({ c, i, oseSw: ose[0][i] ?? 0, oseGw: ose[1][i] ?? 0, msw: m[i][0], mgw: m[i][1], meas: c.k === 'OTH' ? null : OSE2020.meas[1][i] }));
+  const sum = (f) => cmpRows.reduce((a, x) => a + f(x), 0);
+  const cmpTbl = `<div class="mx-scroll"><table class="mx-tbl wu-cmp"><thead><tr><th>Category</th><th class="num" title="OSE estimate of groundwater withdrawals, 2020">OSE GW</th><th class="num" title="Share of groundwater withdrawals OSE counts as measured, statewide (Table 4)">OSE measured</th><th class="num" title="2020 metered pumping from wells in NMWRRS">Metered</th><th class="num" title="Metered as a share of the OSE estimate">% of OSE</th></tr></thead><tbody>
+    ${cmpRows.filter((x) => x.oseGw || x.mgw).map((x) => `<tr><td>${sw(x.c.c)} ${esc(x.c.lbl)}</td><td class="num">${fmt0(x.oseGw)}</td><td class="num">${x.meas == null ? '' : x.meas + '%'}</td><td class="num"><b>${af0(x.mgw)}</b></td><td class="num">${pctOf(x.mgw, x.oseGw)}</td></tr>`).join('')}
+    <tr style="font-weight:700"><td>Total groundwater</td><td class="num">${fmt0(sum((x) => x.oseGw))}</td><td></td><td class="num">${fmt0(sum((x) => x.mgw))}</td><td class="num">${pctOf(sum((x) => x.mgw), sum((x) => x.oseGw))}</td></tr></tbody></table></div>
+    <div class="hint" style="margin-top:4px">Acre-feet. Surface water: OSE ${fmt0(sum((x) => x.oseSw))} AF withdrawn (incl. ${fmt0(cmpRows[8].oseSw)} AF reservoir evaporation) vs. ${fmt0(sum((x) => x.msw))} AF metered on surface-water files here — NMWRRS meters are almost all wells.${cmpCty ? ' “OSE % measured” is statewide; the report has no county breakdown of it.' : ''}</div>`;
+  let ctyCmp = '';
+  if (!cmpCty) {
+    const byC = new Map(); rows.forEach((r) => { if (r[0] === 2020 && !r[7]) byC.set(r[5], (byC.get(r[5]) || 0) + r[v]); });
+    const list = Object.entries(OSE2020.cty).map(([k, o]) => ({ k, ose: o[1].reduce((a, b) => a + b, 0), me: byC.get(k) || 0 })).sort((a, b) => b.ose - a.ose);
+    ctyCmp = `<details class="mx-details"><summary>Groundwater by county, 2020 — OSE report vs. metered</summary><div class="mx-scroll" style="max-height:300px"><table class="mx-tbl"><thead><tr><th>County</th><th class="num">OSE GW, AF</th><th class="num">Metered GW, AF</th><th class="num">Metered ÷ OSE</th></tr></thead><tbody>
+      ${list.map((x) => `<tr class="clickable" data-wucty="${x.k}"><td>${esc(CODE_TABLES.county[x.k] || x.k)}</td><td class="num">${fmt0(x.ose)}</td><td class="num">${af0(x.me)}</td><td class="num">${pctOf(x.me, x.ose)}</td></tr>`).join('')}</tbody></table></div></details>`;
+  }
+  $('mx-state').innerHTML = `
+    <h2>Statewide pumping statistics</h2>
+    <div class="sub2">Metered pumping reported to NMWRRS (harvested ${esc(D.harvest)}), summed by year, use and region. Only metered PODs whose readings OSE posts online are included — this is not all water use.</div>
+    <div class="mx-inline">
+      <label>Year <select id="wuYear">${years.slice().reverse().map((y) => opt(y, y + (y >= thisYear ? ' (partial)' : ''), y === ST.year)).join('')}</select></label>
+      <label>Region <select id="wuBy">${opt('state', 'Statewide', ST.by === 'state')}${opt('county', 'By county', ST.by === 'county')}${opt('basin', 'By OSE basin', ST.by === 'basin')}</select></label>
+      ${ST.by === 'state' ? '' : `<select id="wuRegion">${opt('', ST.by === 'county' ? 'All counties' : 'All basins', !ST.region)}${regions.map((k) => opt(k, wuRegionName(ST.by, k), k === ST.region)).join('')}</select>`}
+      <label>Uses <select id="wuGroup">${opt('cat', 'OSE report categories', ST.group === 'cat')}${opt('code', 'NMWRRS use codes', ST.group === 'code')}</select></label>
+      <label>Totals <select id="wuBasis">${opt(2, 'Excluding flagged readings', v === 2)}${opt(1, 'As reported by OSE', v === 1)}</select></label>
+    </div>
+    ${v === 1 ? '<div class="mx-callout">“As reported” keeps meter rollovers, unit errors and negative corrections, so some years are inflated by millions of acre-feet. Use “Excluding flagged readings” for totals.</div>' : ''}
+    <div class="mx-tiles">
+      <div class="mx-tile"><div class="lbl">${esc(rname)}, ${ST.year}${partial}</div><div class="num">${fmt0(tot)}</div><div class="note">AF metered pumping</div></div>
+      <div class="mx-tile"><div class="lbl">PODs reporting pumping</div><div class="num">${podsRep.toLocaleString()}</div><div class="note">with a total above 0</div></div>
+      <div class="mx-tile"><div class="lbl">Wells (groundwater)</div><div class="num">${fmt0(gwTot)}</div><div class="note">AF · surface files ${fmt0(tot - gwTot)} AF</div></div>
+    </div>
+    <h3>Pumping by year — ${esc(rname)}</h3>
+    <div class="mx-chartbox"><canvas id="wuYearChart"></canvas></div>
+    <h3>By use, ${ST.year} — ${esc(rname)}</h3>
+    <div class="mx-chartbox ${useRows.length > 8 ? 'tall' : 'short'}"><canvas id="wuUseChart"></canvas></div>
+    <div class="mx-scroll" style="max-height:260px"><table class="mx-tbl"><thead><tr><th>${ST.group === 'cat' ? 'Category' : 'Use code'}</th><th class="num">AF</th><th class="num">%</th><th class="num">PODs</th><th class="num">Median AF / POD</th></tr></thead><tbody>
+      ${useRows.map(([k, g]) => { const per = sel.filter((r) => (ST.group === 'cat' ? r[3] : r[4]) === k && r[v] > 0).map((r) => r[v]);
+        return `<tr><td>${sw(colOf(k))} ${esc(lblOf(k))}</td><td class="num"><b>${af0(g.af)}</b></td><td class="num">${tot ? (100 * g.af / tot).toFixed(1) : '—'}</td><td class="num">${g.pods.size.toLocaleString()}</td><td class="num">${fmt(median(per), 1)}</td></tr>`; }).join('')}
+    </tbody></table></div>
+    ${regTbl}
+    <h3>Compared with OSE’s <i>Water Use by Categories 2020</i>${cmpCty ? ' — ' + esc(CODE_TABLES.county[cmpCty]) : ' — statewide'}</h3>
+    <div class="sub2">OSE’s withdrawals (Tech. Rpt. 56, App. B Tables 2, 4 and 5) include estimates for unmetered use; “OSE measured” is the share of groundwater OSE itself counts as measured statewide. The metered column is 2020 NMWRRS pumping (${v === 2 ? 'excluding flagged readings' : 'as reported'}).${ST.by === 'basin' ? ' The report has no table by OSE basin, so this shows the statewide comparison.' : ''}</div>
+    ${cmpTbl}
+    ${ctyCmp}
+    <details class="mx-details"><summary>How NMWRRS use codes are grouped into OSE categories</summary><div class="mx-callout">
+      ${WU_CATS.filter((c) => c.codes).map((c) => `<div>${sw(c.c)} <b>${esc(c.lbl)}</b>: ${c.codes.split(' ').map((u) => `${esc(CODE_TABLES.use[u] || u)} (${u})`).join(', ')}</div>`).join('')}
+      <div>${sw(WU_CATS[9].c)} <b>Other / unclassified</b>: everything else (closed files, no use, pollution control, storage, monitoring, blank, …). A POD with several codes is grouped by its first.</div>
+      <div style="margin-top:6px">This grouping is approximate: OSE assigns its report categories by water system, not by permit use code, and power plants usually carry the Industrial code in NMWRRS. Wells vs. surface: Surface Permit (SP) and Surface Declaration (SD) files count as surface water; all other files as groundwater.</div></div></details>`;
+  // ---- charts
+  const yrs = years.filter((y) => y >= 2000);
+  const ys = new Map(yrs.map((y) => [y, new Array(WU_CATS.length).fill(0)])), yp = new Map(yrs.map((y) => [y, new Set()]));
+  for (const r of rows) { if (!ys.has(r[0]) || !wuInRegion(r)) continue; ys.get(r[0])[r[3]] += r[v]; if (r[v] > 0) yp.get(r[0]).add(r[8]); }
+  const used = WU_CATS.map((c, i) => i).filter((i) => yrs.some((y) => ys.get(y)[i]));
+  mkChart('wuYearChart', { type: 'bar', data: { labels: yrs.map((y) => y >= thisYear ? y + '*' : String(y)),
+      datasets: used.map((i) => ({ label: WU_CATS[i].lbl, data: yrs.map((y) => ys.get(y)[i]), backgroundColor: WU_CATS[i].c, stack: 's' })) },
+    options: { maintainAspectRatio: false, animation: false, interaction: { mode: 'index', intersect: false },
+      plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 10.5 } } },
+        tooltip: { callbacks: { label: (c) => `${c.dataset.label}: ${fmt(c.raw)} AF`, footer: (it) => { const y = yrs[it[0].dataIndex]; return `Total ${fmt(ys.get(y).reduce((a, b) => a + b, 0))} AF · ${yp.get(y).size.toLocaleString()} PODs reporting${y >= thisYear ? ' · year in progress' : ''}`; } } } },
+      scales: { x: { stacked: true, ticks: { font: { size: 10 } } }, y: { stacked: true, title: { display: true, text: 'acre-feet' }, ticks: { callback: (x) => fmt(x) } } } } });
+  const top = useRows.slice(0, 15);
+  mkChart('wuUseChart', { type: 'bar', data: { labels: top.map(([k]) => lblOf(k)), datasets: [{ data: top.map(([, g]) => g.af), backgroundColor: top.map(([k]) => colOf(k)) }] },
+    options: { indexAxis: 'y', maintainAspectRatio: false, animation: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => `${fmt(c.raw)} AF` } } },
+      scales: { x: { title: { display: true, text: 'acre-feet' }, ticks: { callback: (x) => fmt(x) } }, y: { ticks: { font: { size: 10.5 } } } } } });
+  // ---- controls
+  $('wuYear').onchange = (e) => { ST.year = +e.target.value; buildStateTab(); };
+  $('wuBy').onchange = (e) => { ST.by = e.target.value; ST.region = ''; buildStateTab(); };
+  if ($('wuRegion')) $('wuRegion').onchange = (e) => { ST.region = e.target.value; buildStateTab(); };
+  $('wuGroup').onchange = (e) => { ST.group = e.target.value; buildStateTab(); };
+  $('wuBasis').onchange = (e) => { ST.basis = +e.target.value; buildStateTab(); };
+  $('mx-state').querySelectorAll('[data-wureg]').forEach((tr) => { tr.onclick = () => { ST.region = ST.region === tr.dataset.wureg ? '' : tr.dataset.wureg; buildStateTab(); }; });
+  $('mx-state').querySelectorAll('[data-wucty]').forEach((tr) => { tr.onclick = () => { ST.by = 'county'; ST.region = tr.dataset.wucty; buildStateTab(); }; });
+}
+{ let built = false; const b = document.querySelector('#panel .tabs .tab[data-tab="mxstate"]');
+  if (b) b.addEventListener('click', () => { if (!built) { built = true; setTimeout(buildStateTab, 0); } }); }
+
 buildAnomTab(); clearPod(); $('mx-gw').innerHTML = gwEmpty();
 if (PART2_PROBLEM) { toast(PART2_PROBLEM, 12000); $('mx-anoms').insertAdjacentHTML('afterbegin', part2Banner()); }
 applyFilters(); syncLayers();
@@ -3722,7 +3879,8 @@ function wcLookup(k) {
 }
 function wParse(str) {
   if (!str || !String(str).trim()) return [];
-  return String(str).split(/;|,(?=\s*\d)/).map((x) => x.trim()).filter(Boolean).map((x) => {
+  // harvested records sometimes drop the 0 of a surface interval ('-40 Clay' = 0-40 ft)
+  return String(str).replace(/(^|[;,]\s*)-(?=\d)/g, '$10-').split(/;|,(?=\s*\d)/).map((x) => x.trim()).filter(Boolean).map((x) => {
     const m = x.match(/^(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)\s*(.*)$/);
     return m ? { start: +m[1], end: +m[2], code: m[3].trim() } : null;
   }).filter(Boolean);
@@ -3767,15 +3925,21 @@ async function w2wLookup(pid) {
   return j.features?.[0]?.attributes || null;
 }
 let WELL_REQ = 0;
-let WC_LOAD = null, WC_DONE = false;
+let WC_LOAD = null, WC_DONE = false, WELL_LAST = null;
+// well_construction.js is large (~16 MB). Don't make the schematic wait for it: draw right away from the
+// POD layer + live Waters-to-Wells record, and redraw with the screen/water-bearing intervals once it arrives.
+function wcStart() {
+  return WC_LOAD ||= loadScript('well_construction.js').then(() => {
+    WC_DONE = true; WC = null;
+    if (WELL_LAST && WELL_LAST.w2 !== undefined) openWell(WELL_LAST.pr, WELL_LAST.w2);   // (a pending W2W lookup redraws on its own)
+  });
+}
+DATA_LOAD.then(() => setTimeout(wcStart, 1500));   // fetch it in the background once the main data is in
 function openWell(pr, w2) {
   pr = pr || {};
-  if (!window.WELL_CONSTRUCTION && !WC_DONE) {   // ~7 MB, fetched the first time a schematic is opened
-    $('mx-well').innerHTML = '<div class="mx-empty">⏳ Loading well-construction records…</div>'; showTab('mxwell');
-    const req = ++WELL_REQ;
-    (WC_LOAD ||= loadScript('well_construction.js').then(() => { WC_DONE = true; WC = null; })).then(() => { if (req === WELL_REQ) openWell(pr, w2); });
-    return;
-  }
+  WELL_LAST = { pr, w2 };
+  const wcPending = !window.WELL_CONSTRUCTION && !WC_DONE;
+  if (wcPending) wcStart();
   const req = ++WELL_REQ;
   const pid = String(pr.pod_file ?? '').trim();
   const num = (v) => { const n = parseFloat(v); return isFinite(n) && n > 0 ? n : null; };
@@ -3798,6 +3962,7 @@ function openWell(pr, w2) {
   let h = `<div class="mx-head"><h2 style="margin:0">${esc(pid || 'Well')}</h2><span style="flex:1"></span>${url ? `<a class="small" href="${esc(url)}" target="_blank" rel="noopener">OSE summary ↗</a>` : ''}
     ${w2 && w2.Scanned_WellLog_Link ? `<a class="small" href="${esc(w2.Scanned_WellLog_Link)}" target="_blank" rel="noopener">Scanned well log${w2.Scanned_WellLog_Count > 1 ? 's (' + w2.Scanned_WellLog_Count + ')' : ''} ↗</a>` : ''}
     ${podById.has(pid) ? `<button class="small mx-open" data-pod="${esc(pid)}">📈 Meter readings</button>` : ''}</div>
+    ${svg ? '<div style="margin:4px 0;display:flex;gap:6px;justify-content:flex-end"><button type="button" class="small" data-wimg="png">⬇ PNG</button><button type="button" class="small" data-wimg="svg">⬇ SVG</button></div>' : ''}
     <div style="margin:6px 0">${pr.use ? `<span class="mx-pill">Use: ${esc(pr.use)}</span>` : ''}${pr.own_lname ? `<span class="mx-pill">Owner: ${esc(pr.own_lname)}</span>` : ''}</div>
     <div class="mx-tiles">${tile('Total depth (ft)', w.depthWell)}${tile('Depth to water at completion (ft)', w.depthWater)}${tile('Static level (ft)', w.staticLevel)}${tile('Casing (in)', w.casing)}${tile('Elevation (ft)', w.elevation)}${tile('Completed', w.finish)}</div>`;
   if (svg) {
@@ -3806,12 +3971,229 @@ function openWell(pr, w2) {
     if (!w.perf && !w.waterBear) h += `<div class="hint">No screen or water-bearing intervals on file for this POD — depths only.</div>`;
   } else h += `<div class="mx-empty">No depth or construction intervals on file for this POD.</div>`;
   const srcTxt = (k) => k === 'H' ? 'this POD’s NMWRRS summary page (harvested)' : k === 'X' ? 'an older OSE well-record extract' : k === 'W2W' ? 'OSE’s Waters-to-Wells layer (live)' : 'not on file';
-  h += `<div class="hint" style="margin-top:8px">Depths below ground surface. Screens: ${srcTxt(w.perfSrc)}. Water-bearing zones: ${w.waterBear ? srcTxt(w.src) : 'not on file'}${!window.WELL_CONSTRUCTION ? ' (<b>well_construction.js not loaded</b>)' : ''}. Depths from the OSE POD layer, filled from Waters-to-Wells where missing.${w2 === undefined && pid ? ' <span class="muted">Checking Waters-to-Wells…</span>' : ''}</div>`;
-  $('mx-well').innerHTML = h; if (w2 === undefined) showTab('mxwell');
+  h += `<div class="hint" style="margin-top:8px">Depths below ground surface. Screens: ${srcTxt(w.perfSrc)}. Water-bearing zones: ${w.waterBear ? srcTxt(w.src) : 'not on file'}${wcPending ? ' <span class="muted">(⏳ still loading well_construction.js — intervals will be added when it arrives)</span>' : !window.WELL_CONSTRUCTION ? ' (<b>well_construction.js not loaded</b>)' : ''}. Depths from the OSE POD layer, filled from Waters-to-Wells where missing.${w2 === undefined && pid ? ' <span class="muted">Checking Waters-to-Wells…</span>' : ''}</div>`;
+  $('mx-well-one').innerHTML = h; if (w2 === undefined) showTab('mxwell');
   if (w2 === undefined && pid) w2wLookup(pid).then((rec) => { if (req === WELL_REQ) openWell(pr, rec); }).catch(() => { if (req === WELL_REQ) openWell(pr, null); });
 }
 document.addEventListener('click', (e) => { const b = e.target.closest('.mx-wopen'); if (b) { e.preventDefault(); map.closePopup(); openWell(WFEAT.get(b.dataset.pod) || { pod_file: b.dataset.pod }); } });
-$('mx-well').innerHTML = '<div class="mx-empty">Click a point on the map, then <b>🛠 Well schematic</b> on its card.</div>';
+$('mx-well').innerHTML = '<div id="mx-well-one"><div class="mx-empty">Click a well in the list below, or a point on the map and then <b>🛠 Well schematic</b> on its card.</div></div><div id="mx-well-list"></div>';
+// ---------- Wells in the current selection: list with mini profiles, spreadsheet export ----------
+// The selection is whatever PODs the map is showing (area, filters, date range). Construction details come
+// from the POD layer, well_construction.js (harvested NMWRRS well records) and OSE's live Waters-to-Wells
+// layer, which also carries the link to each well's scanned log.
+const W2W_FIELDS = 'POD,Use,WellDepth_ft,PERF,PERF_Top_fbgs,PERF_Bot_fbgs,DTW_Initial_ft,SWL,FinishDate,LogFileDate,EstimatedYield_GPM,Source,WaterRightFiles,WaterRightStatus,Owners,WRDiversions_AFY,NMWRRS_PODSum_URL,Scanned_WellLog_Count,Scanned_WellLog_Link';
+const W2W_CACHE = new Map();   // wkey(POD) -> W2W attributes
+const W2W_BOXES = [];          // extents already fetched in full
+const W2W_MAX = 40000;         // don't pull more live records than this for one selection
+const WL = { key: '', sel: [], rows: [], only: true, sort: 'depth', dir: -1, shown: 300, pick: '', w2w: '', w2wP: null };
+const wlNum = (v) => { const n = parseFloat(v); return isFinite(n) && n > 0 ? n : null; };
+const wlYear = (v) => { if (v == null || v === '') return null; const d = new Date(isNaN(+v) ? v : +v); return isNaN(d) ? null : d.getFullYear(); };
+const wlDate = (v) => { if (v == null || v === '') return ''; const d = new Date(isNaN(+v) ? v : +v); return isNaN(d) ? String(v) : d.toISOString().slice(0, 10); };
+const wlLogUrl = (u) => String(u || '').trim().replace(/ /g, '%20');
+function wlSelection() { return (state.points || []).filter((f) => pointVisible(f) && pointInFilter(f)); }
+function wlWhere() { const a = state.filterPolygon; return a && state.clipToArea ? `in ${a.label || 'the selected area'}` : 'in the current map view'; }
+function wlRow(f) {
+  const p = f.properties || {}, pid = String(p.pod_file ?? '').trim(), k = wkey(pid);
+  const wc = wcLookup(wkey(p.pod_basin, p.pod_nbr, p.pod_suffix)) || wcLookup(k) || {};
+  const w2 = W2W_CACHE.has(k) ? W2W_CACHE.get(k) : (WL.w2w === 'done' ? null : undefined);
+  const perf = wc.perf || (w2 && w2.PERF) || '';
+  const r = { f, p, pid, k, w2, wc, perf, perfSrc: wc.perf ? (wc.src || 'X') : (w2 && w2.PERF ? 'W2W' : ''), wb: wc.waterBear || '',
+    depth: wlNum(p.depth_well) ?? wc.depthWell ?? wlNum(w2 && w2.WellDepth_ft),
+    dtw: wlNum(p.depth_water) ?? wc.depthWater ?? wlNum(w2 && w2.DTW_Initial_ft),
+    swl: wlNum(p.static_level) ?? wc.staticLevel ?? wlNum(w2 && w2.SWL),
+    fin: wlYear(p.finish_date) ?? (+wc.finishYear || (w2 && w2.FinishDate ? wlYear(w2.FinishDate) : null)),
+    log: w2 && w2.Scanned_WellLog_Link ? wlLogUrl(w2.Scanned_WellLog_Link) : '', nlog: (w2 && w2.Scanned_WellLog_Count) || 0 };
+  r.screens = wParse(perf).filter((q) => Math.max(q.start, q.end) > 0);
+  r.zones = wParse(r.wb);
+  r.has = !!(r.depth || r.dtw || r.swl || r.screens.length || r.zones.length || r.log);
+  return r;
+}
+function wlMini(r, max) {
+  const W = 100, x = (d) => Math.max(0, Math.min(W, d / max * W));
+  const bottom = Math.max(r.depth || 0, ...r.screens.map((q) => Math.max(q.start, q.end)));
+  if (!bottom && !r.dtw && !r.swl) return '';
+  let s = `<svg width="${W}" height="12" viewBox="0 0 ${W} 12" style="display:block">`;
+  if (bottom) s += `<rect x="0" y="4" width="${x(bottom)}" height="4" fill="#c9cfca"/>`;
+  r.screens.filter((q) => Math.min(q.start, q.end) > 0).forEach((q) => { const a = x(Math.min(q.start, q.end)); s += `<rect x="${a}" y="2" width="${Math.max(1.5, x(Math.max(q.start, q.end)) - a)}" height="8" fill="${WCOL.perf}"/>`; });
+  if (r.swl) s += `<rect x="${x(r.swl) - .75}" y="0" width="1.5" height="12" fill="${WCOL.stat}"/>`;
+  if (r.dtw) s += `<rect x="${x(r.dtw) - .75}" y="0" width="1.5" height="12" fill="${WCOL.dtw}"/>`;
+  if (bottom > max) s += `<path d="M${W - 5} 1 L${W} 6 L${W - 5} 11 Z" fill="#555"/>`;
+  return s + '</svg>';
+}
+async function wlFetchW2W(sel) {
+  const pts = sel.map((f) => f.geometry && f.geometry.coordinates).filter((c) => c && isFinite(c[0]) && isFinite(c[1]));
+  if (!pts.length) { WL.w2w = 'done'; return; }
+  const bx = [Math.min(...pts.map((c) => c[0])) - 1e-4, Math.min(...pts.map((c) => c[1])) - 1e-4, Math.max(...pts.map((c) => c[0])) + 1e-4, Math.max(...pts.map((c) => c[1])) + 1e-4];
+  if (W2W_BOXES.some((b) => b[0] <= bx[0] && b[1] <= bx[1] && b[2] >= bx[2] && b[3] >= bx[3])) { WL.w2w = 'done'; return; }
+  const base = { f: 'json', where: '1=1', geometry: bx.join(','), geometryType: 'esriGeometryEnvelope', inSR: '4326', spatialRel: 'esriSpatialRelIntersects', returnGeometry: 'false' };
+  const q = (extra) => { const u = new URL(W2W_URL); Object.entries({ ...base, ...extra }).forEach(([k, v]) => u.searchParams.set(k, v)); return fetch(u, { signal: AbortSignal.timeout(45000) }).then((r) => r.json()); };
+  const n = (await q({ returnCountOnly: 'true' })).count;
+  if (!(n >= 0)) throw new Error('W2W count failed');
+  if (n > W2W_MAX) { WL.w2w = 'big'; WL.w2wN = n; return; }
+  const offs = []; for (let o = 0; o < n; o += 2000) offs.push(o);
+  let done = 0, bad = 0;
+  const work = async () => { while (offs.length) { const o = offs.shift();
+    try { const j = await q({ outFields: W2W_FIELDS, orderByFields: 'OBJECTID', resultOffset: String(o), resultRecordCount: '2000' });
+      (j.features || []).forEach((ft) => { const a = ft.attributes, k = wkey(a.POD); if (!W2W_CACHE.has(k)) W2W_CACHE.set(k, a); }); if (!j.features) bad++; } catch (e) { bad++; }
+    done++; WL.w2wMsg = `Loading well-log links from OSE Waters-to-Wells… ${Math.round(100 * done / Math.max(1, Math.ceil(n / 2000)))}%`; wlStatus(); } };
+  await Promise.all(Array.from({ length: 6 }, work));
+  if (bad) throw new Error(bad + ' W2W pages failed');
+  W2W_BOXES.push(bx); WL.w2w = 'done';
+}
+function wlStatus() {
+  const el = $('wlStatus'); if (!el) return;
+  const wcP = !window.WELL_CONSTRUCTION && !WC_DONE;
+  const parts = [];
+  if (wcP) parts.push('⏳ Loading harvested construction records (well_construction.js)…');
+  if (WL.w2w === 'loading') parts.push('⏳ ' + (WL.w2wMsg || 'Loading well-log links from OSE Waters-to-Wells…'));
+  if (WL.w2w === 'big') parts.push(`Well-log links not loaded: the selection’s extent holds ${(WL.w2wN || 0).toLocaleString()} Waters-to-Wells records (limit ${W2W_MAX.toLocaleString()}). Choose a smaller area or zoom in.`);
+  if (WL.w2w === 'error') parts.push('⚠ Could not reach OSE Waters-to-Wells — well-log links and its screens are missing. <a href="#" id="wlRetry">Retry</a>');
+  el.innerHTML = parts.join('<br>');
+  const rt = $('wlRetry'); if (rt) rt.onclick = (e) => { e.preventDefault(); WL.key = ''; wlRefresh(true); };
+}
+function wlRefresh(force) {
+  const host = $('mx-well-list'); if (!host) return;
+  const sel = wlSelection();
+  const key = sel.length + '|' + (sel[0] ? sel[0].properties.pod_file : '') + '|' + (sel.length ? sel[sel.length - 1].properties.pod_file : '') + '|' + wlWhere();
+  if (!force && key === WL.key) return;
+  WL.key = key; WL.sel = sel; WL.shown = 300;
+  if (!sel.length) { host.innerHTML = `<h3>Wells in this selection</h3><div class="mx-empty">No PODs are showing on the map. Zoom in, pick an area or loosen the filters.</div>`; return; }
+  if (!window.WELL_CONSTRUCTION && !WC_DONE) wcStart().then(() => { if (WL.key === key) wlRender(); });
+  WL.w2w = 'loading'; WL.w2wMsg = '';
+  WL.w2wP = wlFetchW2W(sel).catch(() => { WL.w2w = 'error'; }).then(() => { if (WL.key === key) wlRender(); });
+  wlRender();
+}
+function wlRender() {
+  const host = $('mx-well-list'); if (!host) return;
+  WL.rows = WL.sel.map(wlRow);
+  const withInfo = WL.rows.filter((r) => r.has), withLog = WL.rows.filter((r) => r.log);
+  const list = (WL.only ? withInfo : WL.rows).slice();
+  const sk = { pod: (r) => r.pid, use: (r) => String(r.p.use || ''), depth: (r) => r.depth ?? -1, dtw: (r) => r.dtw ?? -1, fin: (r) => r.fin ?? -1, log: (r) => r.nlog }[WL.sort];
+  list.sort((a, b) => { const x = sk(a), y = sk(b); if (typeof x !== 'string' && (x < 0) !== (y < 0)) return x < 0 ? 1 : -1;   // blanks always last
+    return (typeof x === 'string' ? x.localeCompare(y) : x - y) * WL.dir; });
+  const depths = list.map((r) => Math.max(r.depth || 0, ...r.screens.map((q) => Math.max(q.start, q.end)))).filter((d) => d > 0);
+  const max = Math.max(100, quantile(depths, 0.95) || 0);
+  const th = (k, t, cls) => `<th class="${cls || ''}" data-wlsort="${k}">${t}${WL.sort === k ? (WL.dir > 0 ? ' ▲' : ' ▼') : ''}</th>`;
+  host.innerHTML = `
+    <h3 style="margin-top:18px">Wells in this selection</h3>
+    <div class="sub2">${WL.rows.length.toLocaleString()} PODs on the map ${esc(wlWhere())} · <b>${withInfo.length.toLocaleString()}</b> with construction details · ${WL.w2w === 'done' ? `<b>${withLog.length.toLocaleString()}</b> with a scanned well log` : WL.w2w === 'loading' ? 'well-log links loading…' : 'well-log links not loaded'}</div>
+    <div class="mx-inline" style="margin-top:6px">
+      <label><input type="checkbox" id="wlOnly" style="width:auto;vertical-align:middle"${WL.only ? ' checked' : ''}> Only wells with construction details</label>
+      <span style="flex:1"></span><button type="button" class="small" id="wlXlsx">⬇ Spreadsheet (.xlsx)</button>
+    </div>
+    <div class="hint" id="wlStatus"></div>
+    <div class="mx-wleg" style="margin:4px 0"><span>Profile, 0–${fmt(max)} ft:</span><span><i style="background:#c9cfca"></i>Well depth</span><span><i style="background:${WCOL.perf}"></i>Screens</span><span><i style="background:${WCOL.dtw};width:3px"></i>Water at completion</span><span><i style="background:${WCOL.stat};width:3px"></i>Static level</span></div>
+    <div class="mx-scroll" style="max-height:520px"><table class="mx-tbl" id="wlTbl"><thead><tr>${th('pod', 'POD')}${th('use', 'Use')}${th('depth', 'Depth ft', 'num')}${th('dtw', 'Water ft', 'num')}<th>Profile</th>${th('log', 'Log')}</tr></thead><tbody>
+      ${list.slice(0, WL.shown).map((r) => `<tr class="clickable${r.pid === WL.pick ? ' sel' : ''}" data-wlpod="${esc(r.pid)}" title="${esc([r.screens.length ? 'Screens: ' + r.perf : '', r.zones.length ? 'Water-bearing: ' + r.wb : '', r.fin ? 'Completed ' + r.fin : ''].filter(Boolean).join('\n'))}">
+        <td style="white-space:nowrap">${esc(r.pid)}</td><td>${esc(String(r.p.use || ''))}</td><td class="num">${r.depth != null ? fmt(r.depth) : '<span class="muted">—</span>'}</td><td class="num">${r.dtw != null ? fmt(r.dtw) : '<span class="muted">—</span>'}</td>
+        <td>${wlMini(r, max)}</td><td style="white-space:nowrap">${r.log ? `<a href="${esc(r.log)}" target="_blank" rel="noopener" title="Scanned well log${r.nlog > 1 ? 's (' + r.nlog + ')' : ''}">log ↗</a>` : ''}</td></tr>`).join('')}
+    </tbody></table></div>
+    ${list.length > WL.shown ? `<button type="button" class="small" id="wlMore" style="margin-top:6px">Show ${Math.min(500, list.length - WL.shown).toLocaleString()} more (${(list.length - WL.shown).toLocaleString()} not shown)</button>` : ''}
+    ${!list.length ? '<div class="mx-empty" style="margin-top:6px">None of these PODs has construction details on file.</div>' : ''}`;
+  wlStatus();
+  $('wlOnly').onchange = (e) => { WL.only = e.target.checked; WL.shown = 300; wlRender(); };
+  $('wlXlsx').onclick = () => wlExport(list);
+  if ($('wlMore')) $('wlMore').onclick = () => { WL.shown += 500; wlRender(); };
+  host.querySelectorAll('th[data-wlsort]').forEach((t) => { t.onclick = () => { const k = t.dataset.wlsort; WL.dir = WL.sort === k ? -WL.dir : (k === 'pod' || k === 'use' ? 1 : -1); WL.sort = k; wlRender(); }; });
+  host.querySelectorAll('tr[data-wlpod]').forEach((tr) => { tr.onclick = (e) => {
+    if (e.target.closest('a')) return;
+    const r = WL.rows.find((x) => x.pid === tr.dataset.wlpod); if (!r) return;
+    WL.pick = r.pid; host.querySelectorAll('tr.sel').forEach((x) => x.classList.remove('sel')); tr.classList.add('sel');
+    WFEAT.set(r.pid, r.p); openWell(r.p, r.w2 === undefined ? undefined : r.w2);
+    const sc = $('mx-well').closest('.panel-content'); if (sc) sc.scrollTop = 0;
+  }; });
+}
+let XLSX_P = null;
+function ensureXlsx() {
+  if (window.XLSX) return Promise.resolve();
+  return XLSX_P ||= new Promise((res, rej) => { const s = document.createElement('script'); s.src = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
+    s.onload = res; s.onerror = () => { XLSX_P = null; rej(new Error('Could not load the spreadsheet library — check your connection and try again.')); }; document.head.appendChild(s); });
+}
+async function wlExport(list) {
+  const btn = $('wlXlsx'); const old = btn.textContent; btn.disabled = true; btn.textContent = '⏳ Preparing…';
+  try {
+    await ensureXlsx();
+    if (!window.WELL_CONSTRUCTION && !WC_DONE) await wcStart();
+    if (WL.w2w === 'loading' && WL.w2wP) await WL.w2wP;
+    const key = WL.key, rows = WL.sel.map(wlRow);
+    const byPid = new Map(rows.map((r) => [r.pid, r]));
+    const use = list.map((r) => byPid.get(r.pid)).filter((r) => r && (!WL.only || r.has));
+    const srcName = (s) => s === 'H' ? 'NMWRRS well record (harvested)' : s === 'X' ? 'older OSE well-record extract' : s === 'W2W' ? 'OSE Waters-to-Wells' : '';
+    const fields = (state.fields || []).filter((f) => !/^(OBJECTID|Shape)/i.test(f.name) && f.type !== 'esriFieldTypeGeometry');
+    const isDate = new Set(fields.filter((f) => f.type === 'esriFieldTypeDate').map((f) => f.name));
+    const w2wExtra = ['Use', 'WellDepth_ft', 'PERF', 'PERF_Top_fbgs', 'PERF_Bot_fbgs', 'DTW_Initial_ft', 'SWL', 'FinishDate', 'LogFileDate', 'EstimatedYield_GPM', 'Source', 'WaterRightFiles', 'WaterRightStatus', 'Owners', 'WRDiversions_AFY'];
+    const head = ['POD file', 'Owner', 'Use', 'Use description', 'Permit status', 'POD status', 'County', 'Latitude', 'Longitude',
+      'Total depth (ft)', 'Depth to water at completion (ft)', 'Static water level (ft)', 'Casing size (in)', 'Elevation (ft)', 'Year completed',
+      'Screens / perforations (ft below surface)', 'Screens source', 'Water-bearing zones (ft below surface)', 'Water-bearing zones source',
+      'Estimated yield (gpm)', 'Scanned well logs', 'Well log link', 'OSE POD summary', 'OSE water right summary',
+      ...fields.map((f) => 'POD layer: ' + (f.alias && f.alias !== f.name ? `${f.alias} (${f.name})` : f.name)), ...w2wExtra.map((k) => 'Waters-to-Wells: ' + k)];
+    const LINKS = [head.indexOf('Well log link'), head.indexOf('OSE POD summary'), head.indexOf('OSE water right summary')];
+    const aoa = [head];
+    for (const r of use) {
+      const p = r.p, w2 = r.w2 || {}, c = r.f.geometry && r.f.geometry.coordinates;
+      const own = [p.own_fname, p.own_lname].filter((x) => x != null && String(x).trim()).join(' ');
+      aoa.push([r.pid, own, p.use ?? '', CODE_TABLES.use[codeOf(p.use)] || '', p.status ?? '', p.pod_status ?? '', CODE_TABLES.county[p.county] || p.county || '',
+        c ? +(+c[1]).toFixed(6) : '', c ? +(+c[0]).toFixed(6) : '',
+        r.depth ?? '', r.dtw ?? '', r.swl ?? '', (p.casing_size != null && String(p.casing_size).trim()) || r.wc.casing || '', wlNum(p.elevation) ?? r.wc.elevation ?? '', r.fin ?? '',
+        r.screens.map((q) => `${q.start}-${q.end}`).join('; '), srcName(r.perfSrc), r.zones.map((q) => `${q.start}-${q.end}${q.code ? ' ' + q.code : ''}`).join('; '), r.wb ? srcName(r.wc.src) : '',
+        w2.EstimatedYield_GPM ?? p.estimate_yield ?? '', r.nlog || '', r.log, wlLogUrl(w2.NMWRRS_PODSum_URL) || '', nmwrrsSummaryUrl(p) || '',
+        ...fields.map((f) => { const v = p[f.name]; return v == null ? '' : isDate.has(f.name) ? wlDate(v) : v; }),
+        ...w2wExtra.map((k) => { const v = w2[k]; return v == null ? '' : /Date$/.test(k) ? wlDate(v) : v; })]);
+    }
+    const X = window.XLSX, wb = X.utils.book_new();
+    const sheet = (rowsA, widths, linkCols) => {
+      const ws = X.utils.aoa_to_sheet(rowsA);
+      ws['!cols'] = widths.map((w) => ({ wch: w }));
+      if (rowsA.length > 1) ws['!autofilter'] = { ref: X.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: rowsA.length - 1, c: rowsA[0].length - 1 } }) };
+      (linkCols || []).forEach((ci) => { for (let ri = 1; ri < rowsA.length; ri++) { const v = rowsA[ri][ci]; if (v && /^https?:/i.test(v)) { const ref = X.utils.encode_cell({ r: ri, c: ci }); ws[ref].l = { Target: v }; } } });
+      return ws;
+    };
+    X.utils.book_append_sheet(wb, sheet(aoa, head.map((h, i) => i === 0 ? 16 : LINKS.includes(i) ? 40 : i < 24 ? Math.min(30, Math.max(10, h.length)) : 14), LINKS), 'Wells');
+    const scr = [['POD file', 'Top (ft below surface)', 'Bottom (ft below surface)', 'Source']];
+    use.forEach((r) => r.screens.forEach((q) => scr.push([r.pid, q.start, q.end, srcName(r.perfSrc)])));
+    X.utils.book_append_sheet(wb, sheet(scr, [16, 12, 12, 30]), 'Screens');
+    const wbz = [['POD file', 'Top (ft below surface)', 'Bottom (ft below surface)', 'Description']];
+    use.forEach((r) => r.zones.forEach((q) => wbz.push([r.pid, q.start, q.end, q.code])));
+    X.utils.book_append_sheet(wb, sheet(wbz, [16, 12, 12, 50]), 'Water-bearing zones');
+    const now = new Date();
+    const about = [['Water Use vs. Aquifer Conditions Explorer — well construction export'], [],
+      ['Exported', now.toLocaleString()], ['Selection', `${WL.sel.length.toLocaleString()} PODs on the map ${wlWhere()}`],
+      ['Wells in this file', use.length + (WL.only ? ' (only wells with construction details)' : ' (all PODs in the selection)')],
+      ['With a scanned well log', use.filter((r) => r.log).length], [],
+      ['Sources'], ['POD layer', 'NMOSE GIS_WATERS_PODs (live; every field is included in the Wells sheet)'],
+      ['Waters-to-Wells', WL.w2w === 'done' ? 'NMOSE W2W_Well_PODs (live): screens, well-log links, yields, water-right files' : 'Not included — ' + (WL.w2w === 'big' ? 'selection too large' : 'service unavailable')],
+      ['Harvested well records', window.WELL_CONSTRUCTION ? 'well_construction.js (NMWRRS POD summaries): screens and water-bearing zones' : 'well_construction.js not loaded'], [],
+      ['Notes'], ['', 'Depths are feet below ground surface. Depth, water level and casing come from the POD layer first, then the harvested records, then Waters-to-Wells.'],
+      ['', 'Screens come from the harvested records first, then Waters-to-Wells.'], ['', 'Well log links open OSE’s scanned document viewer (feith.ose.state.nm.us).']];
+    const wa = X.utils.aoa_to_sheet(about); wa['!cols'] = [{ wch: 26 }, { wch: 100 }]; X.utils.book_append_sheet(wb, wa, 'About');
+    const tag = (state.filterPolygon && state.clipToArea && state.filterPolygon.label ? state.filterPolygon.label : 'map_view').replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 40);
+    X.writeFile(wb, `wells_${tag}_${now.toISOString().slice(0, 10)}.xlsx`);
+    if (key !== WL.key) toast('The selection changed while exporting — the file reflects the earlier selection.');
+  } catch (e) { toast(e.message || String(e), 8000); }
+  finally { btn.disabled = false; btn.textContent = old; }
+}
+// download the single well's schematic as PNG / SVG
+function wellImage(kind) {
+  const svg = $('mx-well-one') && $('mx-well-one').querySelector('svg'); if (!svg) return;
+  const vb = svg.viewBox.baseVal, title = ($('mx-well-one').querySelector('h2') || {}).textContent || 'well';
+  const c = svg.cloneNode(true); c.setAttribute('xmlns', 'http://www.w3.org/2000/svg'); c.setAttribute('width', vb.width); c.setAttribute('height', vb.height); c.removeAttribute('style'); c.setAttribute('font-family', 'ui-monospace, Menlo, Consolas, monospace');
+  const head = 30, outer = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  outer.setAttribute('xmlns', 'http://www.w3.org/2000/svg'); outer.setAttribute('width', vb.width); outer.setAttribute('height', vb.height + head); outer.setAttribute('viewBox', `0 0 ${vb.width} ${vb.height + head}`);
+  outer.innerHTML = `<rect width="100%" height="100%" fill="#fff"/><text x="12" y="20" font-family="system-ui,sans-serif" font-size="14" font-weight="700" fill="#1c1c1c">${esc(title)}</text>`;
+  c.setAttribute('y', head); outer.appendChild(c);
+  const xml = new XMLSerializer().serializeToString(outer), name = 'well_schematic_' + title.replace(/[^A-Za-z0-9]+/g, '_');
+  const save = (blob, ext) => { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name + ext; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000); };
+  if (kind === 'svg') return save(new Blob([xml], { type: 'image/svg+xml' }), '.svg');
+  const img = new Image(), k = 3;
+  img.onload = () => { const cv = document.createElement('canvas'); cv.width = vb.width * k; cv.height = (vb.height + head) * k; const g = cv.getContext('2d'); g.scale(k, k); g.drawImage(img, 0, 0); cv.toBlob((b) => save(b, '.png'), 'image/png'); };
+  img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(xml);
+}
+document.addEventListener('click', (e) => { const b = e.target.closest('[data-wimg]'); if (b) { e.preventDefault(); wellImage(b.dataset.wimg); } });
+// keep the list in step with the map while the tab is open
+{ let t = null; const _rb = window.rebuildVisibleMarkers;
+  window.rebuildVisibleMarkers = function () { const r = _rb.apply(this, arguments); clearTimeout(t); t = setTimeout(() => { if (activeTab() === 'mxwell') wlRefresh(); }, 700); return r; };
+  const b = document.querySelector('#panel .tabs .tab[data-tab="mxwell"]'); if (b) b.addEventListener('click', () => setTimeout(() => wlRefresh(), 0)); }
+
 
 window.MX = { openWell, openPod, setArea, clearArea, clearPod, S, D };   // handy from the console
 })();
