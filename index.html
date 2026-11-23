@@ -3935,8 +3935,37 @@ function wcStart() {
   });
 }
 DATA_LOAD.then(() => setTimeout(wcStart, 1500));   // fetch it in the background once the main data is in
+// OSE's scanned documents (feith) only show to an open public session, which a water right's document list
+// on NMWRRS starts. So a log link opens that list first, then jumps to the exact log search.
+const WELLLOG_PAGE = /^https?:/.test(location.protocol) ? new URL('welllog.html', location.href).href : 'https://steeltapejockey.github.io/NMOSE-POD-Explorer/welllog.html';
+const logEvent = (u) => { const m = String(u || '').match(/[?&]event=([^&]*)/); return m ? decodeURIComponent(m[1].replace(/\+/g, ' ')).trim() : ''; };
+// the water right file whose documents hold the well's log: the longest file number the POD number starts with
+const wrFileOf = (p, w2) => {
+  const own = String((p && p.db_file) || '').trim() || (p && p.basin && p.nbr ? [p.basin, p.nbr, p.suffix].map((x) => String(x || '').trim()).filter(Boolean).join('-') : '');
+  const pod = String((p && p.pod_file) || '').trim(), cands = String((w2 && w2.WaterRightFiles) || '').split(',').map((x) => x.trim()).filter(Boolean);
+  const hit = cands.filter((c) => pod === c || pod.startsWith(c + '-')).sort((a, b) => b.length - a.length)[0];
+  return hit || own || cands[0] || ''; };
+const wrDocsUrl = (file) => { const x = String(file || '').split('-'); return x[0] && x[1] ? 'https://nmwrrs.ose.nm.gov/nmwrrs/subreports/water-right-images?' + new URLSearchParams({ basin: x[0], number: x[1], suffix: x.slice(2).join('-') }) : ''; };
+const wellLogPage = (ev, file, pod) => ev ? WELLLOG_PAGE + '?' + new URLSearchParams({ event: ev, file: file || '', pod: pod || '' }).toString().replace(/\+/g, '%20') : '';
+let LOG_SESSION_AT = 0;
+document.addEventListener('click', (e) => {
+  const a = e.target.closest('a[data-wlog]'); if (!a) return;
+  e.preventDefault(); e.stopPropagation();
+  const search = a.dataset.wlog, docs = wrDocsUrl(a.dataset.wfile) || 'https://nmwrrs.ose.nm.gov/nmwrrs/subreports/water-right-images?basin=B&number=00691&suffix=';
+  const fresh = Date.now() - LOG_SESSION_AT < 15 * 60e3;
+  const w = window.open(fresh ? search : docs, 'oseWellLog');
+  if (!w) { toast('Allow pop-ups for this page to open OSE well logs.', 7000); return; }
+  if (!fresh) { LOG_SESSION_AT = Date.now(); setTimeout(() => { try { w.location.href = search; } catch (err) {} }, 2500); }
+}, true);
+// ring the well whose schematic is showing (same orange ring as a selected meter POD)
+function wellHighlight(pid) {
+  selLayer.clearLayers();
+  const f = pid && (state.points || []).find((q) => String(q.properties?.pod_file ?? '').trim() === pid), c = f && f.geometry && f.geometry.coordinates;
+  if (c && isFinite(c[0]) && isFinite(c[1])) L.circleMarker([c[1], c[0]], { radius: 15, weight: 3, color: C_SEL, fill: false, interactive: false }).addTo(selLayer);
+}
 function openWell(pr, w2) {
   pr = pr || {};
+  wellHighlight(String(pr.pod_file ?? '').trim());
   WELL_LAST = { pr, w2 };
   const wcPending = !window.WELL_CONSTRUCTION && !WC_DONE;
   if (wcPending) wcStart();
@@ -3960,7 +3989,7 @@ function openWell(pr, w2) {
   const svg = wellSvg(w), tile = (k, v) => `<div class="mx-tile"><div class="lbl">${k}</div><div class="num" style="font-size:17px">${v != null && v !== '' ? esc(String(v)) : '—'}</div></div>`;
   const url = typeof nmwrrsSummaryUrl === 'function' && pr.pod_basin ? nmwrrsSummaryUrl(pr) : (podById.has(pid) ? podReportUrl(podById.get(pid)) : '');
   let h = `<div class="mx-head"><h2 style="margin:0">${esc(pid || 'Well')}</h2><span style="flex:1"></span>${url ? `<a class="small" href="${esc(url)}" target="_blank" rel="noopener">OSE summary ↗</a>` : ''}
-    ${w2 && w2.Scanned_WellLog_Link ? `<a class="small" href="${esc(w2.Scanned_WellLog_Link)}" target="_blank" rel="noopener">Scanned well log${w2.Scanned_WellLog_Count > 1 ? 's (' + w2.Scanned_WellLog_Count + ')' : ''} ↗</a>` : ''}
+    ${w2 && w2.Scanned_WellLog_Link ? `<a class="small" data-wlog="${esc(wlLogUrl(w2.Scanned_WellLog_Link))}" data-wfile="${esc(wrFileOf(pr, w2))}" href="${esc(wlLogUrl(w2.Scanned_WellLog_Link))}" target="_blank" rel="noopener">Scanned well log${w2.Scanned_WellLog_Count > 1 ? 's (' + w2.Scanned_WellLog_Count + ')' : ''} ↗</a>` : ''}
     ${podById.has(pid) ? `<button class="small mx-open" data-pod="${esc(pid)}">📈 Meter readings</button>` : ''}</div>
     ${svg ? '<div style="margin:4px 0;display:flex;gap:6px;justify-content:flex-end"><button type="button" class="small" data-wimg="png">⬇ PNG</button><button type="button" class="small" data-wimg="svg">⬇ SVG</button></div>' : ''}
     <div style="margin:6px 0">${pr.use ? `<span class="mx-pill">Use: ${esc(pr.use)}</span>` : ''}${pr.own_lname ? `<span class="mx-pill">Owner: ${esc(pr.own_lname)}</span>` : ''}</div>
@@ -4002,7 +4031,7 @@ function wlRow(f) {
     dtw: wlNum(p.depth_water) ?? wc.depthWater ?? wlNum(w2 && w2.DTW_Initial_ft),
     swl: wlNum(p.static_level) ?? wc.staticLevel ?? wlNum(w2 && w2.SWL),
     fin: wlYear(p.finish_date) ?? (+wc.finishYear || (w2 && w2.FinishDate ? wlYear(w2.FinishDate) : null)),
-    log: w2 && w2.Scanned_WellLog_Link ? wlLogUrl(w2.Scanned_WellLog_Link) : '', nlog: (w2 && w2.Scanned_WellLog_Count) || 0 };
+    log: w2 && w2.Scanned_WellLog_Link ? wlLogUrl(w2.Scanned_WellLog_Link) : '', nlog: (w2 && w2.Scanned_WellLog_Count) || 0, wrFile: wrFileOf(p, w2) };
   r.screens = wParse(perf).filter((q) => Math.max(q.start, q.end) > 0);
   r.zones = wParse(r.wb);
   r.has = !!(r.depth || r.dtw || r.swl || r.screens.length || r.zones.length || r.log);
@@ -4086,7 +4115,7 @@ function wlRender() {
     <div class="mx-scroll" style="max-height:520px"><table class="mx-tbl" id="wlTbl"><thead><tr>${th('pod', 'POD')}${th('use', 'Use')}${th('depth', 'Depth ft', 'num')}${th('dtw', 'Water ft', 'num')}<th>Profile</th>${th('log', 'Log')}</tr></thead><tbody>
       ${list.slice(0, WL.shown).map((r) => `<tr class="clickable${r.pid === WL.pick ? ' sel' : ''}" data-wlpod="${esc(r.pid)}" title="${esc([r.screens.length ? 'Screens: ' + r.perf : '', r.zones.length ? 'Water-bearing: ' + r.wb : '', r.fin ? 'Completed ' + r.fin : ''].filter(Boolean).join('\n'))}">
         <td style="white-space:nowrap">${esc(r.pid)}</td><td>${esc(String(r.p.use || ''))}</td><td class="num">${r.depth != null ? fmt(r.depth) : '<span class="muted">—</span>'}</td><td class="num">${r.dtw != null ? fmt(r.dtw) : '<span class="muted">—</span>'}</td>
-        <td>${wlMini(r, max)}</td><td style="white-space:nowrap">${r.log ? `<a href="${esc(r.log)}" target="_blank" rel="noopener" title="Scanned well log${r.nlog > 1 ? 's (' + r.nlog + ')' : ''}">log ↗</a>` : ''}</td></tr>`).join('')}
+        <td>${wlMini(r, max)}</td><td style="white-space:nowrap">${r.log ? `<a data-wlog="${esc(r.log)}" data-wfile="${esc(r.wrFile)}" href="${esc(r.log)}" target="_blank" rel="noopener" title="Scanned well log${r.nlog > 1 ? 's (' + r.nlog + ')' : ''}">log ↗</a>` : ''}</td></tr>`).join('')}
     </tbody></table></div>
     ${list.length > WL.shown ? `<button type="button" class="small" id="wlMore" style="margin-top:6px">Show ${Math.min(500, list.length - WL.shown).toLocaleString()} more (${(list.length - WL.shown).toLocaleString()} not shown)</button>` : ''}
     ${!list.length ? '<div class="mx-empty" style="margin-top:6px">None of these PODs has construction details on file.</div>' : ''}`;
@@ -4125,9 +4154,9 @@ async function wlExport(list) {
     const head = ['POD file', 'Owner', 'Use', 'Use description', 'Permit status', 'POD status', 'County', 'Latitude', 'Longitude',
       'Total depth (ft)', 'Depth to water at completion (ft)', 'Static water level (ft)', 'Casing size (in)', 'Elevation (ft)', 'Year completed',
       'Screens / perforations (ft below surface)', 'Screens source', 'Water-bearing zones (ft below surface)', 'Water-bearing zones source',
-      'Estimated yield (gpm)', 'Scanned well logs', 'Well log link', 'OSE POD summary', 'OSE water right summary',
+      'Estimated yield (gpm)', 'Scanned well logs', 'Well log link', 'Well log event', 'Water right file', 'Water right documents (no login)', 'OSE POD summary', 'OSE water right summary',
       ...fields.map((f) => 'POD layer: ' + (f.alias && f.alias !== f.name ? `${f.alias} (${f.name})` : f.name)), ...w2wExtra.map((k) => 'Waters-to-Wells: ' + k)];
-    const LINKS = [head.indexOf('Well log link'), head.indexOf('OSE POD summary'), head.indexOf('OSE water right summary')];
+    const LINKS = ['Well log link', 'Water right documents (no login)', 'OSE POD summary', 'OSE water right summary'].map((h) => head.indexOf(h));
     const aoa = [head];
     for (const r of use) {
       const p = r.p, w2 = r.w2 || {}, c = r.f.geometry && r.f.geometry.coordinates;
@@ -4136,7 +4165,7 @@ async function wlExport(list) {
         c ? +(+c[1]).toFixed(6) : '', c ? +(+c[0]).toFixed(6) : '',
         r.depth ?? '', r.dtw ?? '', r.swl ?? '', (p.casing_size != null && String(p.casing_size).trim()) || r.wc.casing || '', wlNum(p.elevation) ?? r.wc.elevation ?? '', r.fin ?? '',
         r.screens.map((q) => `${q.start}-${q.end}`).join('; '), srcName(r.perfSrc), r.zones.map((q) => `${q.start}-${q.end}${q.code ? ' ' + q.code : ''}`).join('; '), r.wb ? srcName(r.wc.src) : '',
-        w2.EstimatedYield_GPM ?? p.estimate_yield ?? '', r.nlog || '', r.log, wlLogUrl(w2.NMWRRS_PODSum_URL) || '', nmwrrsSummaryUrl(p) || '',
+        w2.EstimatedYield_GPM ?? p.estimate_yield ?? '', r.nlog || '', wellLogPage(logEvent(r.log), r.wrFile, r.pid), logEvent(r.log), r.wrFile, wrDocsUrl(r.wrFile), wlLogUrl(w2.NMWRRS_PODSum_URL) || '', nmwrrsSummaryUrl(p) || '',
         ...fields.map((f) => { const v = p[f.name]; return v == null ? '' : isDate.has(f.name) ? wlDate(v) : v; }),
         ...w2wExtra.map((k) => { const v = w2[k]; return v == null ? '' : /Date$/.test(k) ? wlDate(v) : v; })]);
     }
@@ -4164,7 +4193,7 @@ async function wlExport(list) {
       ['Waters-to-Wells', WL.w2w === 'done' ? 'NMOSE W2W_Well_PODs (live): screens, well-log links, yields, water-right files' : 'Not included — ' + (WL.w2w === 'big' ? 'selection too large' : 'service unavailable')],
       ['Harvested well records', window.WELL_CONSTRUCTION ? 'well_construction.js (NMWRRS POD summaries): screens and water-bearing zones' : 'well_construction.js not loaded'], [],
       ['Notes'], ['', 'Depths are feet below ground surface. Depth, water level and casing come from the POD layer first, then the harvested records, then Waters-to-Wells.'],
-      ['', 'Screens come from the harvested records first, then Waters-to-Wells.'], ['', 'Well log links open OSE’s scanned document viewer (feith.ose.state.nm.us).']];
+      ['', 'Screens come from the harvested records first, then Waters-to-Wells.'], ['', 'OSE’s scanned documents (feith.ose.state.nm.us) only open in a public session. “Well log link” goes to welllog.html (upload it to the site next to index.html), which starts that session and jumps to the log. “Water right documents” lists every scanned document in the water right file and needs no login; the well log is the row whose Event matches “Well log event”.']];
     const wa = X.utils.aoa_to_sheet(about); wa['!cols'] = [{ wch: 26 }, { wch: 100 }]; X.utils.book_append_sheet(wb, wa, 'About');
     const tag = (state.filterPolygon && state.clipToArea && state.filterPolygon.label ? state.filterPolygon.label : 'map_view').replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 40);
     X.writeFile(wb, `wells_${tag}_${now.toISOString().slice(0, 10)}.xlsx`);

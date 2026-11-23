@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Open OSE well log</title>
+<style>
+  body { font: 15px/1.5 system-ui, -apple-system, Segoe UI, sans-serif; color: #1c231f; background: #f5f5f3; margin: 0; display: flex; min-height: 100vh; align-items: center; justify-content: center; }
+  .card { background: #fff; border: 1px solid #ddd; border-radius: 10px; padding: 22px 26px; max-width: 520px; box-shadow: 0 3px 14px rgba(0,0,0,.08); }
+  h1 { font-size: 18px; margin: 0 0 6px; } .muted { color: #6b746e; font-size: 13px; }
+  button { font: inherit; font-weight: 700; background: #1f6f4a; color: #fff; border: none; border-radius: 8px; padding: 10px 18px; cursor: pointer; margin: 14px 0 10px; }
+  a { color: #1f6fb5; }
+</style></head>
+<body><div class="card">
+  <h1 id="t">Open OSE well log</h1>
+  <div id="d" class="muted"></div>
+  <button id="go">Open the scanned well log</button>
+  <div class="muted">OSE’s document system only shows a log to an open public session. This opens one (you’ll briefly see the water right’s document list), then jumps to the log — double-click its row to view it. Allow pop-ups for this page if nothing opens.</div>
+  <div id="alt" class="muted" style="margin-top:10px"></div>
+</div>
+<script>
+// Part of the Water Use vs. Aquifer Conditions Explorer. Link format: welllog.html?event=<OSE event, e.g. 641279 1982-01-07 LOG>&file=<water right file, e.g. B-00087-B>&pod=<POD>
+const q = new URLSearchParams(location.search), ev = (q.get('event') || '').trim(), file = (q.get('file') || '').trim(), pod = (q.get('pod') || '').trim();
+const parts = file.split('-'), docs = parts[0] && parts[1] ? 'https://nmwrrs.ose.nm.gov/nmwrrs/subreports/water-right-images?' + new URLSearchParams({ basin: parts[0], number: parts[1], suffix: parts.slice(2).join('-') }) : 'https://nmwrrs.ose.nm.gov/nmwrrs/subreports/water-right-images?basin=B&number=00691&suffix=';
+const search = 'https://feith.ose.state.nm.us/webfdd/SearchFc.do?' + new URLSearchParams({ _field: '0', _query: '', _tree_server: '12', wr_id: '', db_file_number: ' ', trn_nbr: '', event: ev, fddcomment: '', _max_fetch: '100', _fc_id: '5', _view: '1', _sort_string: '', _index_search: '', _search_type: '0', _forward: '', level: '0', word_proximity: '100', boost: '2' }).toString().replace(/\+/g, '%20');
+document.getElementById('t').textContent = 'Well log' + (pod ? ' for ' + pod : '');
+document.getElementById('d').textContent = ev ? 'OSE document event ' + ev + (file ? ' · water right file ' + file : '') : 'No well-log event in this link.';
+if (file) document.getElementById('alt').innerHTML = 'Or browse every document in water right file <a href="' + docs + '" target="_blank" rel="noopener">' + file + '</a> (no login needed).';
+document.getElementById('go').onclick = () => {
+  if (!ev) return;
+  const w = window.open(docs, 'oseWellLog');
+  if (!w) { location.href = docs; return; }
+  setTimeout(() => { try { w.location.href = search; } catch (e) {} }, 2500);
+};
+</script>
+</body></html>
